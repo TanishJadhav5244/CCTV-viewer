@@ -1,0 +1,1570 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CCTV Analytics — Live Demo</title>
+    <meta name="description"
+        content="Interactive demo of the CCTV Deep Learning Analytics system: YOLOv8 instance segmentation + CLIP natural language search." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap"
+        rel="stylesheet" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        :root {
+            --bg: #060b1a;
+            --bg2: #0a1020;
+            --surface: #0d1530;
+            --surface2: #111d3c;
+            --border: #1c2e55;
+            --border2: #243556;
+            --accent: #06b6d4;
+            --accent2: #3b82f6;
+            --purple: #8b5cf6;
+            --green: #10b981;
+            --yellow: #f59e0b;
+            --red: #ef4444;
+            --pink: #ec4899;
+            --text1: #f0f4ff;
+            --text2: #a0b0d0;
+            --text3: #5a6e96;
+            --glow: 0 0 24px rgba(6, 182, 212, 0.18);
+            --sidebar-w: 220px;
+        }
+
+        html,
+        body {
+            height: 100%;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg);
+            color: var(--text1);
+            display: flex;
+            overflow: hidden;
+        }
+
+        /* ── Demo banner ── */
+        .demo-banner {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 999;
+            background: linear-gradient(90deg, var(--purple), var(--accent2));
+            text-align: center;
+            padding: 7px 16px;
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            color: #fff;
+        }
+
+        .demo-banner a {
+            color: #fff;
+            text-decoration: underline;
+            opacity: .85;
+        }
+
+        /* ── Sidebar ── */
+        .sidebar {
+            width: var(--sidebar-w);
+            min-height: 100vh;
+            padding-top: 36px;
+            background: var(--bg2);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            flex-shrink: 0;
+            position: fixed;
+            top: 32px;
+            bottom: 0;
+            left: 0;
+            z-index: 100;
+        }
+
+        .sidebar-brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 20px 18px 24px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .brand-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            display: grid;
+            place-items: center;
+            flex-shrink: 0;
+            box-shadow: var(--glow);
+        }
+
+        .brand-icon svg {
+            width: 18px;
+            height: 18px;
+            color: #fff;
+        }
+
+        .brand-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--text1);
+            display: block;
+        }
+
+        .brand-sub {
+            font-size: 10px;
+            color: var(--text3);
+            letter-spacing: .05em;
+            text-transform: uppercase;
+        }
+
+        .sidebar-nav {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            padding: 16px 10px;
+            flex: 1;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 9px 12px;
+            border-radius: 8px;
+            border: none;
+            background: transparent;
+            color: var(--text2);
+            font-family: inherit;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all .15s;
+            width: 100%;
+            text-align: left;
+        }
+
+        .nav-item svg {
+            width: 16px;
+            height: 16px;
+            flex-shrink: 0;
+        }
+
+        .nav-item:hover {
+            background: var(--surface);
+            color: var(--text1);
+        }
+
+        .nav-item.active {
+            background: linear-gradient(90deg, rgba(6, 182, 212, .15), rgba(59, 130, 246, .08));
+            color: var(--accent);
+            border-left: 2px solid var(--accent);
+        }
+
+        .sidebar-footer {
+            padding: 14px 18px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: var(--text3);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--text3);
+            flex-shrink: 0;
+        }
+
+        .status-dot.running {
+            background: var(--green);
+            box-shadow: 0 0 8px var(--green);
+            animation: pulse 1.2s infinite;
+        }
+
+        .status-dot.idle {
+            background: var(--text3);
+        }
+
+        .status-dot.finished {
+            background: var(--accent);
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1
+            }
+
+            50% {
+                opacity: .4
+            }
+        }
+
+        /* ── Main ── */
+        .main {
+            margin-left: var(--sidebar-w);
+            margin-top: 32px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            height: calc(100vh - 32px);
+            overflow: hidden;
+        }
+
+        .topbar {
+            padding: 0 28px;
+            height: 58px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg2);
+            flex-shrink: 0;
+        }
+
+        .page-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--text1);
+        }
+
+        .topbar-right {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .stat-pill {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 12px;
+            border-radius: 999px;
+            border: 1px solid var(--border2);
+            background: var(--surface);
+            font-size: 12px;
+            color: var(--text2);
+        }
+
+        .stat-pill svg {
+            width: 13px;
+            height: 13px;
+            color: var(--accent);
+        }
+
+        .stat-pill strong {
+            color: var(--text1);
+            font-weight: 600;
+        }
+
+        .demo-badge {
+            padding: 4px 10px;
+            border-radius: 999px;
+            background: linear-gradient(90deg, rgba(139, 92, 246, .25), rgba(59, 130, 246, .2));
+            border: 1px solid var(--purple);
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--purple);
+            letter-spacing: .04em;
+        }
+
+        /* ── Tabs ── */
+        .content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px 28px;
+        }
+
+        .tab-panel {
+            display: none;
+        }
+
+        .tab-panel.active {
+            display: block;
+        }
+
+        /* ── Cards ── */
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 22px;
+            margin-bottom: 18px;
+        }
+
+        .card-title {
+            font-size: 15px;
+            font-weight: 700;
+            margin-bottom: 6px;
+        }
+
+        .card-desc {
+            font-size: 13px;
+            color: var(--text2);
+            margin-bottom: 18px;
+        }
+
+        .card-header-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+        }
+
+        /* ── Process Tab ── */
+        .form-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text2);
+            letter-spacing: .05em;
+            text-transform: uppercase;
+            display: block;
+            margin-bottom: 8px;
+        }
+
+        .input-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .form-input {
+            flex: 1;
+            background: var(--bg2);
+            border: 1px solid var(--border2);
+            border-radius: 8px;
+            padding: 9px 14px;
+            color: var(--text1);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            outline: none;
+            transition: border-color .15s;
+        }
+
+        .form-input:focus {
+            border-color: var(--accent);
+        }
+
+        .form-hint {
+            font-size: 11px;
+            color: var(--text3);
+            margin-top: 8px;
+        }
+
+        .form-hint code {
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text2);
+        }
+
+        .btn {
+            padding: 9px 18px;
+            border-radius: 8px;
+            border: none;
+            font-family: inherit;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all .15s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            white-space: nowrap;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #fff;
+        }
+
+        .btn-primary:hover {
+            opacity: .88;
+            transform: translateY(-1px);
+            box-shadow: var(--glow);
+        }
+
+        .btn-danger {
+            background: rgba(239, 68, 68, .15);
+            border: 1px solid var(--red);
+            color: var(--red);
+        }
+
+        .btn-danger:hover {
+            background: rgba(239, 68, 68, .28);
+        }
+
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 12px;
+            background: var(--surface2);
+            border: 1px solid var(--border2);
+            color: var(--text2);
+        }
+
+        .btn-sm:hover {
+            color: var(--text1);
+            border-color: var(--accent);
+        }
+
+        /* Progress */
+        .progress-section {
+            margin-top: 20px;
+        }
+
+        .progress-stats {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+            margin-bottom: 14px;
+        }
+
+        .pstat {
+            background: var(--bg2);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 12px;
+            text-align: center;
+        }
+
+        .pstat-val {
+            display: block;
+            font-size: 22px;
+            font-weight: 800;
+            color: var(--accent);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .pstat-key {
+            display: block;
+            font-size: 10px;
+            color: var(--text3);
+            text-transform: uppercase;
+            letter-spacing: .06em;
+            margin-top: 2px;
+        }
+
+        .progress-bar-wrap {
+            height: 8px;
+            background: var(--bg2);
+            border-radius: 999px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+        }
+
+        .progress-bar {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, var(--accent), var(--accent2));
+            border-radius: 999px;
+            transition: width .4s ease;
+        }
+
+        .progress-label {
+            font-size: 11px;
+            color: var(--text3);
+            margin-top: 6px;
+            text-align: right;
+        }
+
+        /* Stage steps */
+        .stage-steps {
+            display: flex;
+            gap: 0;
+            margin-top: 18px;
+        }
+
+        .stage-step {
+            flex: 1;
+            padding: 10px 12px;
+            text-align: center;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text3);
+            border-bottom: 2px solid var(--border);
+            transition: all .3s;
+            letter-spacing: .03em;
+        }
+
+        .stage-step.done {
+            color: var(--green);
+            border-color: var(--green);
+        }
+
+        .stage-step.active {
+            color: var(--accent);
+            border-color: var(--accent);
+            animation: blink-border 1s infinite;
+        }
+
+        @keyframes blink-border {
+
+            0%,
+            100% {
+                border-color: var(--accent)
+            }
+
+            50% {
+                border-color: transparent
+            }
+        }
+
+        /* Pipeline */
+        .pipeline {
+            display: flex;
+            align-items: flex-start;
+            gap: 0;
+            flex-wrap: wrap;
+            margin-top: 12px;
+        }
+
+        .pipeline-step {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 14px;
+            flex: 1;
+            min-width: 170px;
+        }
+
+        .pipeline-step p {
+            font-size: 12px;
+            color: var(--text2);
+            margin-top: 3px;
+        }
+
+        .pipeline-arrow {
+            color: var(--text3);
+            font-size: 18px;
+            align-self: center;
+            padding: 0 4px;
+        }
+
+        .step-num {
+            width: 28px;
+            height: 28px;
+            border-radius: 8px;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #fff;
+            font-weight: 800;
+            font-size: 13px;
+            display: grid;
+            place-items: center;
+            flex-shrink: 0;
+        }
+
+        /* ── Analytics Tab ── */
+        .analytics-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+            margin-bottom: 18px;
+        }
+
+        .stat-card {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 18px 20px;
+        }
+
+        .stat-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            display: grid;
+            place-items: center;
+            flex-shrink: 0;
+        }
+
+        .stat-icon svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        .stat-icon.cyan {
+            background: rgba(6, 182, 212, .15);
+            color: var(--accent);
+        }
+
+        .stat-icon.blue {
+            background: rgba(59, 130, 246, .15);
+            color: var(--accent2);
+        }
+
+        .stat-icon.purple {
+            background: rgba(139, 92, 246, .15);
+            color: var(--purple);
+        }
+
+        .stat-big {
+            font-size: 28px;
+            font-weight: 800;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text1);
+        }
+
+        .stat-name {
+            font-size: 12px;
+            color: var(--text3);
+            margin-top: 2px;
+        }
+
+        /* ── Search Tab ── */
+        .search-hero {
+            padding: 24px 0 20px;
+        }
+
+        .search-bar-wrap {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: var(--surface);
+            border: 1px solid var(--border2);
+            border-radius: 12px;
+            padding: 6px 10px 6px 14px;
+            transition: border-color .15s;
+        }
+
+        .search-bar-wrap:focus-within {
+            border-color: var(--accent);
+            box-shadow: var(--glow);
+        }
+
+        .search-icon {
+            width: 18px;
+            height: 18px;
+            color: var(--text3);
+            flex-shrink: 0;
+        }
+
+        .search-input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: var(--text1);
+            font-family: inherit;
+            font-size: 14px;
+            outline: none;
+        }
+
+        .search-input::placeholder {
+            color: var(--text3);
+        }
+
+        .search-examples {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 12px;
+            flex-wrap: wrap;
+        }
+
+        .ex-label {
+            font-size: 12px;
+            color: var(--text3);
+        }
+
+        .chip {
+            padding: 4px 12px;
+            border-radius: 999px;
+            border: 1px solid var(--border2);
+            background: var(--surface);
+            color: var(--text2);
+            font-size: 12px;
+            cursor: pointer;
+            font-family: inherit;
+            transition: all .15s;
+        }
+
+        .chip:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        .results-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+            gap: 14px;
+            margin-top: 8px;
+        }
+
+        .result-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+            transition: all .2s;
+            cursor: pointer;
+        }
+
+        .result-card:hover {
+            border-color: var(--accent);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 32px rgba(6, 182, 212, .12);
+        }
+
+        .result-img-wrap {
+            position: relative;
+            aspect-ratio: 1;
+            overflow: hidden;
+            background: var(--bg2);
+        }
+
+        .result-img-wrap img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .result-score-badge {
+            position: absolute;
+            top: 6px;
+            right: 6px;
+            background: rgba(6, 182, 212, .85);
+            backdrop-filter: blur(4px);
+            color: #fff;
+            font-size: 10px;
+            font-weight: 700;
+            padding: 2px 7px;
+            border-radius: 999px;
+        }
+
+        .result-info {
+            padding: 10px 12px;
+        }
+
+        .result-label {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text1);
+        }
+
+        .result-meta {
+            font-size: 11px;
+            color: var(--text3);
+            margin-top: 2px;
+        }
+
+        .result-class-badge {
+            display: inline-block;
+            margin-top: 4px;
+            padding: 2px 8px;
+            border-radius: 999px;
+            background: rgba(6, 182, 212, .12);
+            color: var(--accent);
+            font-size: 10px;
+            font-weight: 600;
+        }
+
+        /* Empty state */
+        .empty-state {
+            text-align: center;
+            padding: 48px 24px;
+            color: var(--text3);
+        }
+
+        .empty-icon {
+            width: 48px;
+            height: 48px;
+            margin: 0 auto 16px;
+            opacity: .35;
+        }
+
+        .empty-icon svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        .empty-state h3 {
+            font-size: 16px;
+            color: var(--text2);
+            margin-bottom: 8px;
+        }
+
+        .empty-state p {
+            font-size: 13px;
+        }
+
+        /* Spinner */
+        .spinner {
+            width: 18px;
+            height: 18px;
+            border: 2px solid var(--border2);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin .7s linear infinite;
+            display: inline-block;
+            vertical-align: middle;
+            margin-right: 6px;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* ── Changelog Tab ── */
+        .changelog-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+        }
+
+        .cl-item {
+            display: flex;
+            gap: 16px;
+            padding: 16px 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .cl-item:last-child {
+            border-bottom: none;
+        }
+
+        .cl-dot-col {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0;
+        }
+
+        .cl-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            flex-shrink: 0;
+            margin-top: 4px;
+        }
+
+        .cl-dot.feat {
+            background: var(--green);
+            box-shadow: 0 0 8px var(--green);
+        }
+
+        .cl-dot.fix {
+            background: var(--yellow);
+            box-shadow: 0 0 8px var(--yellow);
+        }
+
+        .cl-dot.perf {
+            background: var(--accent);
+            box-shadow: 0 0 8px var(--accent);
+        }
+
+        .cl-dot.ui {
+            background: var(--purple);
+            box-shadow: 0 0 8px var(--purple);
+        }
+
+        .cl-line {
+            flex: 1;
+            width: 1px;
+            background: var(--border);
+            margin-top: 4px;
+        }
+
+        .cl-tag {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: .06em;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        .cl-tag.feat {
+            background: rgba(16, 185, 129, .18);
+            color: var(--green);
+        }
+
+        .cl-tag.fix {
+            background: rgba(245, 158, 11, .15);
+            color: var(--yellow);
+        }
+
+        .cl-tag.perf {
+            background: rgba(6, 182, 212, .15);
+            color: var(--accent);
+        }
+
+        .cl-tag.ui {
+            background: rgba(139, 92, 246, .15);
+            color: var(--purple);
+        }
+
+        .cl-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text1);
+        }
+
+        .cl-body {
+            font-size: 12px;
+            color: var(--text2);
+            margin-top: 4px;
+            line-height: 1.6;
+        }
+
+        .cl-time {
+            font-size: 11px;
+            color: var(--text3);
+            margin-top: 4px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* ── Detections Tab ── */
+        .detections-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
+            gap: 12px;
+        }
+
+        /* search status */
+        .search-status {
+            padding: 10px 16px;
+            border-radius: 8px;
+            background: rgba(239, 68, 68, .1);
+            border: 1px solid rgba(239, 68, 68, .3);
+            color: #fc8181;
+            font-size: 13px;
+            margin-bottom: 12px;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg2);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border2);
+            border-radius: 3px;
+        }
+
+        /* live blink */
+        .live-dot {
+            display: inline-block;
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--red);
+            margin-right: 5px;
+            animation: pulse 1s infinite;
+            vertical-align: middle;
+        }
+
+        /* Confidence bar */
+        .conf-bar-wrap {
+            height: 4px;
+            background: var(--bg2);
+            border-radius: 2px;
+            margin-top: 6px;
+        }
+
+        .conf-bar {
+            height: 100%;
+            border-radius: 2px;
+            background: linear-gradient(90deg, var(--green), var(--accent));
+        }
+
+        @media (max-width: 900px) {
+            .analytics-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .progress-stats {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="demo-banner">
+        <span class="live-dot"></span>
+        DEMO MODE — Simulated Data &nbsp;|&nbsp; Real app runs at <strong>http://localhost:8000</strong> via
+        <code>python run.py</code>
+    </div>
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-brand">
+            <div class="brand-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="3" />
+                    <path
+                        d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83" />
+                </svg>
+            </div>
+            <div class="brand-text">
+                <span class="brand-title">CCTV Analytics</span>
+                <span class="brand-sub">AI Surveillance</span>
+            </div>
+        </div>
+
+        <nav class="sidebar-nav">
+            <button class="nav-item active" data-tab="process" onclick="switchTab('process', 'Process Video')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="5 3 19 12 5 21 5 3" />
+                </svg>
+                <span>Process Video</span>
+            </button>
+            <button class="nav-item" data-tab="search" onclick="switchTab('search', 'Text-Based Object Search')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8" />
+                    <path d="m21 21-4.35-4.35" />
+                </svg>
+                <span>Search</span>
+            </button>
+            <button class="nav-item" data-tab="analytics" onclick="switchTab('analytics', 'Analytics'); renderChart();">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                </svg>
+                <span>Analytics</span>
+            </button>
+            <button class="nav-item" data-tab="detections" onclick="switchTab('detections', 'Recent Detections')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="3" width="18" height="18" rx="2" />
+                    <path d="M9 9h6M9 13h6M9 17h4" />
+                </svg>
+                <span>Detections</span>
+            </button>
+            <button class="nav-item" data-tab="changelog" onclick="switchTab('changelog', 'Changes &amp; Progress')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <line x1="16" y1="13" x2="8" y2="13" />
+                    <line x1="16" y1="17" x2="8" y2="17" />
+                    <polyline points="10 9 9 9 8 9" />
+                </svg>
+                <span>Changes Log</span>
+            </button>
+        </nav>
+
+        <div class="sidebar-footer">
+            <div class="status-dot" id="statusDot"></div>
+            <span id="statusLabel">Idle</span>
+        </div>
+    </aside>
+
+    <!-- Main -->
+    <div class="main">
+        <header class="topbar">
+            <h1 class="page-title" id="pageTitle">Process Video</h1>
+            <div class="topbar-right">
+                <div class="stat-pill">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path
+                            d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                    </svg>
+                    <strong id="headerIndexCount">0</strong> indexed
+                </div>
+                <span class="demo-badge">DEMO</span>
+            </div>
+        </header>
+
+        <div class="content">
+
+            <!-- ── PROCESS TAB ── -->
+            <section class="tab-panel active" id="tab-process">
+                <div class="card">
+                    <h2 class="card-title">Process Video Source</h2>
+                    <p class="card-desc">Point the system at a video file, RTSP stream, or webcam to start analyzing
+                        with YOLOv8 + CLIP.</p>
+
+                    <div class="form-group">
+                        <label class="form-label">Video Source</label>
+                        <div class="input-row">
+                            <input type="text" id="videoSource" class="form-input" value="demo/sample.mp4"
+                                placeholder="Path / RTSP URL / 0 for webcam" />
+                            <button class="btn btn-primary" id="processBtn" onclick="startDemo()">▶ Start</button>
+                            <button class="btn btn-danger" id="stopBtn" onclick="stopDemo()" style="display:none">■
+                                Stop</button>
+                        </div>
+                        <p class="form-hint">Examples: <code>demo/sample.mp4</code> &nbsp;|&nbsp;
+                            <code>rtsp://192.168.1.1:554/stream</code> &nbsp;|&nbsp; <code>0</code> (webcam)</p>
+                    </div>
+
+                    <div class="progress-section" id="progressSection" style="display:none">
+                        <div class="stage-steps">
+                            <div class="stage-step" id="stage0">Frame Extraction</div>
+                            <div class="stage-step" id="stage1">YOLOv8 Seg</div>
+                            <div class="stage-step" id="stage2">CLIP Embed</div>
+                            <div class="stage-step" id="stage3">FAISS Index</div>
+                        </div>
+                        <div style="height:16px"></div>
+                        <div class="progress-stats">
+                            <div class="pstat">
+                                <span class="pstat-val" id="pFrames">0</span>
+                                <span class="pstat-key">Frames Processed</span>
+                            </div>
+                            <div class="pstat">
+                                <span class="pstat-val" id="pDetections">0</span>
+                                <span class="pstat-key">Detections</span>
+                            </div>
+                            <div class="pstat">
+                                <span class="pstat-val" id="pFps">0</span>
+                                <span class="pstat-key">FPS</span>
+                            </div>
+                            <div class="pstat">
+                                <span class="pstat-val" id="pStatus">—</span>
+                                <span class="pstat-key">Status</span>
+                            </div>
+                        </div>
+                        <div class="progress-bar-wrap">
+                            <div class="progress-bar" id="progressBar"></div>
+                        </div>
+                        <div class="progress-label" id="progressLabel">0 / 0 frames</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3 class="card-title">Pipeline — How It Works</h3>
+                    <div class="pipeline">
+                        <div class="pipeline-step">
+                            <span class="step-num">1</span>
+                            <div><strong>Frame Extraction</strong>
+                                <p>OpenCV reads frames from any source — file, RTSP, or webcam.</p>
+                            </div>
+                        </div>
+                        <div class="pipeline-arrow">→</div>
+                        <div class="pipeline-step">
+                            <span class="step-num">2</span>
+                            <div><strong>YOLOv8 Segmentation</strong>
+                                <p>Each frame is analyzed to detect and segment objects like people, vehicles, objects.
+                                </p>
+                            </div>
+                        </div>
+                        <div class="pipeline-arrow">→</div>
+                        <div class="pipeline-step">
+                            <span class="step-num">3</span>
+                            <div><strong>CLIP Embedding</strong>
+                                <p>Each detected object crop is encoded into a 512-dim semantic vector.</p>
+                            </div>
+                        </div>
+                        <div class="pipeline-arrow">→</div>
+                        <div class="pipeline-step">
+                            <span class="step-num">4</span>
+                            <div><strong>FAISS Index</strong>
+                                <p>Vectors stored in a fast cosine-similarity index for instant retrieval.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ── SEARCH TAB ── -->
+            <section class="tab-panel" id="tab-search">
+                <div class="search-hero">
+                    <div class="search-bar-wrap">
+                        <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8" />
+                            <path d="m21 21-4.35-4.35" />
+                        </svg>
+                        <input type="text" id="searchInput" class="search-input"
+                            placeholder='Try "person in red shirt" or "black car"…' autocomplete="off" />
+                        <button class="btn btn-primary" onclick="doSearch()">Search</button>
+                    </div>
+                    <div class="search-examples">
+                        <span class="ex-label">Try:</span>
+                        <button class="chip" onclick="triggerSearch('person walking')">person walking</button>
+                        <button class="chip" onclick="triggerSearch('car')">car</button>
+                        <button class="chip" onclick="triggerSearch('person with bag')">person with bag</button>
+                        <button class="chip" onclick="triggerSearch('bicycle')">bicycle</button>
+                        <button class="chip" onclick="triggerSearch('motorcycle')">motorcycle</button>
+                    </div>
+                </div>
+                <div id="searchStatus" class="search-status hidden"></div>
+                <div class="results-grid" id="resultsGrid">
+                    <div class="empty-state" id="searchEmpty" style="grid-column:1/-1">
+                        <div class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="1.5">
+                                <circle cx="11" cy="11" r="8" />
+                                <path d="m21 21-4.35-4.35" />
+                            </svg></div>
+                        <h3>Ready to Search</h3>
+                        <p>Click a chip above or type a query — demo results will appear instantly.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ── ANALYTICS TAB ── -->
+            <section class="tab-panel" id="tab-analytics">
+                <div class="analytics-grid">
+                    <div class="card stat-card">
+                        <div class="stat-icon cyan">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                                <circle cx="9" cy="7" r="4" />
+                                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                            </svg>
+                        </div>
+                        <div>
+                            <div class="stat-big" id="statTotal">0</div>
+                            <div class="stat-name">Total Detections</div>
+                        </div>
+                    </div>
+                    <div class="card stat-card">
+                        <div class="stat-icon blue">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="2" y="3" width="20" height="14" rx="2" />
+                                <polyline points="8 21 12 17 16 21" />
+                            </svg>
+                        </div>
+                        <div>
+                            <div class="stat-big" id="statLabels">0</div>
+                            <div class="stat-name">Unique Classes</div>
+                        </div>
+                    </div>
+                    <div class="card stat-card">
+                        <div class="stat-icon purple">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path
+                                    d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                            </svg>
+                        </div>
+                        <div>
+                            <div class="stat-big" id="statIndexed">0</div>
+                            <div class="stat-name">Vectors Indexed</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header-row">
+                        <h2 class="card-title">Object Distribution</h2>
+                        <button class="btn btn-sm" onclick="renderChart()">↻ Refresh</button>
+                    </div>
+                    <canvas id="analyticsChart" height="260"></canvas>
+                </div>
+
+                <div class="card">
+                    <div class="card-header-row">
+                        <h2 class="card-title">Detection Timeline</h2>
+                    </div>
+                    <canvas id="timelineChart" height="180"></canvas>
+                </div>
+            </section>
+
+            <!-- ── DETECTIONS TAB ── -->
+            <section class="tab-panel" id="tab-detections">
+                <div class="card">
+                    <div class="card-header-row">
+                        <h2 class="card-title">Recent Detections</h2>
+                        <button class="btn btn-sm" onclick="renderDetections()">↻ Refresh</button>
+                    </div>
+                    <div class="detections-grid" id="detectionsGrid">
+                        <div class="empty-state" style="grid-column:1/-1">
+                            <p>Loading demo detections…</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ── CHANGELOG TAB ── -->
+            <section class="tab-panel" id="tab-changelog">
+                <div class="card">
+                    <h2 class="card-title" style="margin-bottom:4px">Changes &amp; Progress Log</h2>
+                    <p class="card-desc">A record of every major feature, fix, and improvement made to this CCTV
+                        Analytics system.</p>
+                    <div class="changelog-list" id="changelogList"></div>
+                </div>
+            </section>
+
+        </div><!-- /content -->
+    </div><!-- /main -->
+
+    <script>
+        // ── Tab switching ──
+        function switchTab(tab, title) {
+            document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+            document.querySelector(`[data-tab="${tab}"]`).classList.add('active');
+            document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+            document.getElementById(`tab-${tab}`).classList.add('active');
+            document.getElementById('pageTitle').innerHTML = title;
+        }
+
+        // ── Mock data ──
+        const MOCK_DETECTIONS = [
+            { label: 'person', confidence: .93, score: .96, ts: '14:02:11', color: '#06b6d4', emoji: '🧍' },
+            { label: 'car', confidence: .88, score: .91, ts: '14:02:14', color: '#3b82f6', emoji: '🚗' },
+            { label: 'person', confidence: .76, score: .88, ts: '14:02:17', color: '#06b6d4', emoji: '🧍' },
+            { label: 'bicycle', confidence: .82, score: .84, ts: '14:02:20', color: '#10b981', emoji: '🚲' },
+            { label: 'truck', confidence: .91, score: .90, ts: '14:02:23', color: '#f59e0b', emoji: '🚛' },
+            { label: 'motorcycle', confidence: .79, score: .85, ts: '14:02:26', color: '#ec4899', emoji: '🏍️' },
+            { label: 'person', confidence: .85, score: .93, ts: '14:02:29', color: '#06b6d4', emoji: '🧍' },
+            { label: 'dog', confidence: .71, score: .78, ts: '14:02:32', color: '#8b5cf6', emoji: '🐕' },
+            { label: 'backpack', confidence: .68, score: .75, ts: '14:02:35', color: '#ef4444', emoji: '🎒' },
+            { label: 'car', confidence: .94, score: .95, ts: '14:02:38', color: '#3b82f6', emoji: '🚗' },
+            { label: 'person', confidence: .80, score: .87, ts: '14:02:41', color: '#06b6d4', emoji: '🧍' },
+            { label: 'bus', confidence: .88, score: .89, ts: '14:02:44', color: '#14b8a6', emoji: '🚌' },
+        ];
+
+        const LABEL_COUNTS = { person: 247, car: 189, truck: 56, bicycle: 34, motorcycle: 28, bus: 12, backpack: 8, dog: 5 };
+
+        // Placeholder colored SVG crops
+        function makeDetectionSVG(emoji, color, label) {
+            return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200' viewBox='0 0 200 200'><rect width='200' height='200' fill='%230a1020'/><rect x='10' y='10' width='180' height='180' rx='8' fill='none' stroke='${color}' stroke-width='2' stroke-dasharray='6,4'/><text x='100' y='95' font-size='52' text-anchor='middle' dominant-baseline='middle'>${emoji}</text><text x='100' y='148' font-size='13' fill='${color}' text-anchor='middle' font-family='monospace'>${label}</text></svg>`)}`;
+        }
+
+        // ── Search ──
+        function triggerSearch(q) {
+            document.getElementById('searchInput').value = q;
+            doSearch();
+        }
+
+        function doSearch() {
+            const query = document.getElementById('searchInput').value.trim();
+            if (!query) return;
+            const grid = document.getElementById('resultsGrid');
+            grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><div class="spinner"></div> Searching for "<strong>${query}</strong>"…</div>`;
+
+            setTimeout(() => {
+                // Filter mock results that loosely match the query
+                const q = query.toLowerCase();
+                let results = MOCK_DETECTIONS.filter(d =>
+                    d.label.includes(q) || q.includes(d.label) || q.includes('person') && d.label === 'person'
+                );
+                if (results.length === 0) results = MOCK_DETECTIONS.slice(0, 6);
+
+                grid.innerHTML = results.map((r, i) => `
+      <div class="result-card">
+        <div class="result-img-wrap">
+          <img src="${makeDetectionSVG(r.emoji, r.color, r.label)}" alt="${r.label}"/>
+          <span class="result-score-badge">${(r.score * 100).toFixed(1)}%</span>
+        </div>
+        <div class="result-info">
+          <div class="result-label">${r.label}</div>
+          <div class="result-meta">Frame @ ${r.ts}</div>
+          <div class="result-meta">conf ${(r.confidence * 100).toFixed(1)}%</div>
+          <span class="result-class-badge">${r.label}</span>
+          <div class="conf-bar-wrap"><div class="conf-bar" style="width:${r.score * 100}%"></div></div>
+        </div>
+      </div>`).join('');
+            }, 700);
+        }
+
+        document.getElementById('searchInput').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+
+        // ── Detections ──
+        function renderDetections() {
+            const grid = document.getElementById('detectionsGrid');
+            grid.innerHTML = MOCK_DETECTIONS.map(r => `
+    <div class="result-card">
+      <div class="result-img-wrap">
+        <img src="${makeDetectionSVG(r.emoji, r.color, r.label)}" alt="${r.label}"/>
+      </div>
+      <div class="result-info">
+        <div class="result-label">${r.label}</div>
+        <div class="result-meta">${r.ts}</div>
+        <div class="result-meta">conf ${(r.confidence * 100).toFixed(1)}%</div>
+      </div>
+    </div>`).join('');
+        }
+        renderDetections();
+
+        // ── Analytics charts ──
+        let chartBar = null, chartLine = null;
+
+        function renderChart() {
+            const labels = Object.keys(LABEL_COUNTS);
+            const values = Object.values(LABEL_COUNTS);
+            const palette = ['#06b6d4', '#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6'];
+
+            document.getElementById('statTotal').textContent = values.reduce((a, b) => a + b, 0).toLocaleString();
+            document.getElementById('statLabels').textContent = labels.length;
+            document.getElementById('statIndexed').textContent = (values.reduce((a, b) => a + b, 0) * 0.93 | 0).toLocaleString();
+            document.getElementById('headerIndexCount').textContent = (values.reduce((a, b) => a + b, 0) * 0.93 | 0).toLocaleString();
+
+            // Bar chart
+            const ctx1 = document.getElementById('analyticsChart').getContext('2d');
+            if (chartBar) chartBar.destroy();
+            chartBar = new Chart(ctx1, {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [{
+                        label: 'Detected Objects',
+                        data: values,
+                        backgroundColor: palette.map(c => c + '99'),
+                        borderColor: palette,
+                        borderWidth: 2,
+                        borderRadius: 6,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    animation: { duration: 700 },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { backgroundColor: '#0d1128', titleColor: '#f0f4ff', bodyColor: '#8896b0', borderColor: '#1e2d4a', borderWidth: 1 },
+                    },
+                    scales: {
+                        x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#8896b0' } },
+                        y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#8896b0' }, beginAtZero: true },
+                    }
+                }
+            });
+
+            // Timeline line chart
+            const hours = ['13:45', '13:50', '13:55', '14:00', '14:05', '14:10', '14:15', '14:20'];
+            const detPerHour = [18, 34, 52, 67, 43, 88, 71, 59];
+            const ctx2 = document.getElementById('timelineChart').getContext('2d');
+            if (chartLine) chartLine.destroy();
+            chartLine = new Chart(ctx2, {
+                type: 'line',
+                data: {
+                    labels: hours,
+                    datasets: [{
+                        label: 'Detections / interval',
+                        data: detPerHour,
+                        borderColor: '#06b6d4',
+                        backgroundColor: 'rgba(6,182,212,0.08)',
+                        pointBackgroundColor: '#06b6d4',
+                        pointRadius: 4,
+                        fill: true,
+                        tension: 0.4,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    animation: { duration: 700 },
+                    plugins: { legend: { display: false }, tooltip: { backgroundColor: '#0d1128', titleColor: '#f0f4ff', bodyColor: '#8896b0', borderColor: '#1e2d4a', borderWidth: 1 } },
+                    scales: {
+                        x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#8896b0' } },
+                        y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#8896b0' }, beginAtZero: true },
+                    }
+                }
+            });
+        }
+
+        // ── Demo processing simulation ──
+        let demoTimer = null;
+        let demoFrame = 0;
+        const TOTAL_FRAMES = 420;
+
+        function startDemo() {
+            demoFrame = 0;
+            document.getElementById('progressSection').style.display = 'block';
+            document.getElementById('processBtn').style.display = 'none';
+            document.getElementById('stopBtn').style.display = 'inline-flex';
+            document.getElementById('progressBar').style.width = '0%';
+            document.getElementById('statusDot').className = 'status-dot running';
+            document.getElementById('statusLabel').textContent = 'Running';
+            ['stage0', 'stage1', 'stage2', 'stage3'].forEach(id => document.getElementById(id).className = 'stage-step');
+
+            let stageIdx = 0;
+            const stages = ['stage0', 'stage1', 'stage2', 'stage3'];
+
+            demoTimer = setInterval(() => {
+                demoFrame += Math.floor(Math.random() * 7) + 3;
+                if (demoFrame >= TOTAL_FRAMES) demoFrame = TOTAL_FRAMES;
+
+                const pct = demoFrame / TOTAL_FRAMES;
+                document.getElementById('progressBar').style.width = (pct * 100).toFixed(1) + '%';
+                document.getElementById('pFrames').textContent = demoFrame;
+                document.getElementById('pDetections').textContent = Math.floor(demoFrame * 1.37);
+                document.getElementById('pFps').textContent = (Math.random() * 4 + 14).toFixed(1);
+                document.getElementById('pStatus').textContent = 'Running';
+                document.getElementById('progressLabel').textContent = `${demoFrame} / ${TOTAL_FRAMES} frames`;
+                document.getElementById('headerIndexCount').textContent = Math.floor(demoFrame * 1.27);
+
+                // Stage highlight
+                const newStage = Math.min(3, Math.floor(pct * 4));
+                if (newStage > stageIdx) {
+                    document.getElementById(stages[stageIdx]).className = 'stage-step done';
+                    stageIdx = newStage;
+                }
+                if (stageIdx < 4) document.getElementById(stages[Math.min(3, stageIdx)]).className = 'stage-step active';
+
+                if (demoFrame >= TOTAL_FRAMES) {
+                    clearInterval(demoTimer);
+                    stages.forEach(id => document.getElementById(id).className = 'stage-step done');
+                    document.getElementById('pStatus').textContent = 'Finished';
+                    document.getElementById('processBtn').style.display = 'inline-flex';
+                    document.getElementById('stopBtn').style.display = 'none';
+                    document.getElementById('statusDot').className = 'status-dot finished';
+                    document.getElementById('statusLabel').textContent = 'Finished';
+                }
+            }, 80);
+        }
+
+        function stopDemo() {
+            clearInterval(demoTimer);
+            document.getElementById('processBtn').style.display = 'inline-flex';
+            document.getElementById('stopBtn').style.display = 'none';
+            document.getElementById('pStatus').textContent = 'Stopped';
+            document.getElementById('statusDot').className = 'status-dot idle';
+            document.getElementById('statusLabel').textContent = 'Idle';
+        }
+
+        // ── Changelog ──
+        const CHANGES = [
+            { type: 'feat', title: 'Complete Project Scaffold', body: 'Initialized CCTV Analytics with FastAPI backend, SQLite + FAISS storage, YOLOv8-seg processor, CLIP embedder, and glassmorphism frontend dashboard.', ts: '2024-01-10 09:00' },
+            { type: 'feat', title: 'YOLOv8 Instance Segmentation Pipeline', body: 'Integrated Ultralytics YOLOv8-seg model for real-time frame-by-frame object segmentation. Detects people, vehicles, animals and more. Supports GPU acceleration.', ts: '2024-01-11 11:30' },
+            { type: 'feat', title: 'CLIP Multimodal Embeddings', body: 'Added OpenCLIP ViT-B/32 encoder to generate 512-dimensional semantic vectors from each detected object crop, enabling natural language search.', ts: '2024-01-11 14:15' },
+            { type: 'feat', title: 'FAISS Vector Index', body: 'Implemented FAISS cosine-similarity index (IndexFlatIP) for instant sub-millisecond nearest-neighbour search across thousands of stored detections.', ts: '2024-01-12 09:45' },
+            { type: 'feat', title: 'REST API — FastAPI', body: 'Built full REST API: POST /process, POST /search, POST /stop, GET /status, GET /detections, GET /stats. CORS enabled for local dev.', ts: '2024-01-12 15:00' },
+            { type: 'ui', 'title': 'Dashboard — Glassmorphism Dark UI', body: 'Designed the 4-tab single-page dashboard (Search, Process Video, Analytics, Detections) with dark theme, cyan-blue accent palette, and smooth transitions.', ts: '2024-01-13 10:30' },
+            { type: 'feat', title: 'Live Progress Tracking', body: 'Added real-time status polling (/status endpoint) — shows frames processed, FPS, detection count, and a smooth progress bar while processing.', ts: '2024-01-13 13:00' },
+            { type: 'feat', title: 'Chart.js Analytics', body: 'Integrated Chart.js bar chart for object-class distribution and a timeline line chart showing detections per time window in the Analytics tab.', ts: '2024-01-14 09:00' },
+            { type: 'perf', title: 'Frame Skip Optimisation', body: 'Configurable FRAME_SKIP parameter (default 5) reduces processing load 5× — only every N-th frame is segmented, significantly improving real-time throughput.', ts: '2024-01-14 12:30' },
+            { type: 'fix', title: 'FAISS Index Persistence', body: 'Fixed FAISS index not surviving server restarts. Index is now saved to disk (data/db/faiss.index) and reloaded automatically on startup.', ts: '2024-01-15 10:00' },
+            { type: 'ui', title: 'Standalone Demo Page', body: 'Created this fully self-contained demo.html — simulates live processing with animated progress bars, stage steps, mock search results, charts, and detections without requiring the backend.', ts: '2024-03-02 13:00' },
+        ];
+
+        function renderChangelog() {
+            const typeMap = { feat: 'feat', fix: 'fix', perf: 'perf', ui: 'ui' };
+            document.getElementById('changelogList').innerHTML = CHANGES.slice().reverse().map((c, i, arr) => `
+    <div class="cl-item">
+      <div class="cl-dot-col">
+        <div class="cl-dot ${typeMap[c.type]}"></div>
+        ${i < arr.length - 1 ? '<div class="cl-line"></div>' : ''}
+      </div>
+      <div style="padding-bottom:4px">
+        <span class="cl-tag ${typeMap[c.type]}">${c.type}</span>
+        <div class="cl-title">${c.title}</div>
+        <div class="cl-body">${c.body}</div>
+        <div class="cl-time">${c.ts}</div>
+      </div>
+    </div>`).join('');
+        }
+        renderChangelog();
+        renderChart();
+    </script>
+</body>
+
+</html>

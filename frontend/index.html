@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>CCTV Analytics — AI Surveillance System</title>
+  <meta name="description" content="Deep Learning CCTV Analytics: real-time instance segmentation and natural language object search powered by YOLOv8 and CLIP."/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet"/>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="/static/style.css"/>
+</head>
+<body>
+
+  <!-- Side Navigation -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <span class="brand-title">CCTV Analytics</span>
+        <span class="brand-sub">AI Surveillance</span>
+      </div>
+    </div>
+
+    <nav class="sidebar-nav">
+      <button class="nav-item active" data-tab="search" id="nav-search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <span>Search</span>
+      </button>
+      <button class="nav-item" data-tab="process" id="nav-process">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        <span>Process Video</span>
+      </button>
+      <button class="nav-item" data-tab="analytics" id="nav-analytics">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        <span>Analytics</span>
+      </button>
+      <button class="nav-item" data-tab="detections" id="nav-detections">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6M9 13h6M9 17h4"/></svg>
+        <span>Detections</span>
+      </button>
+    </nav>
+
+    <div class="sidebar-status">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusLabel">Idle</span>
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="main-content">
+
+    <!-- Header -->
+    <header class="topbar">
+      <h1 class="page-title" id="pageTitle">Text-Based Object Search</h1>
+      <div class="topbar-right">
+        <div class="stat-pill" id="headerIndexSize">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+          <span id="headerIndexCount">0</span> indexed
+        </div>
+      </div>
+    </header>
+
+    <!-- ── SEARCH TAB ── -->
+    <section class="tab-panel active" id="tab-search">
+      <div class="search-hero">
+        <div class="search-bar-wrap">
+          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <input
+            type="text"
+            id="searchInput"
+            class="search-input"
+            placeholder='Try "person in red shirt" or "black car"…'
+            autocomplete="off"
+          />
+          <button class="btn btn-primary" id="searchBtn">Search</button>
+        </div>
+        <div class="search-examples">
+          <span class="ex-label">Try: </span>
+          <button class="chip" onclick="triggerSearch('person walking')">person walking</button>
+          <button class="chip" onclick="triggerSearch('car')">car</button>
+          <button class="chip" onclick="triggerSearch('person with bag')">person with bag</button>
+          <button class="chip" onclick="triggerSearch('bicycle')">bicycle</button>
+        </div>
+      </div>
+
+      <div id="searchStatus" class="search-status hidden"></div>
+
+      <div class="results-grid" id="resultsGrid">
+        <div class="empty-state" id="searchEmpty">
+          <div class="empty-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          </div>
+          <h3>Ready to Search</h3>
+          <p>Process a video first, then search using natural language to find objects.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── PROCESS TAB ── -->
+    <section class="tab-panel" id="tab-process">
+      <div class="card process-card">
+        <h2 class="card-title">Process Video Source</h2>
+        <p class="card-desc">Point the system at a video file, RTSP stream, or webcam to start analyzing with YOLOv8 + CLIP.</p>
+
+        <div class="form-group">
+          <label class="form-label">Video Source</label>
+          <div class="input-row">
+            <input type="text" id="videoSource" class="form-input" value="demo/sample.mp4" placeholder="Path to video / RTSP URL / 0 for webcam"/>
+            <button class="btn btn-primary" id="processBtn" onclick="startProcessing()">▶ Start</button>
+            <button class="btn btn-danger" id="stopBtn" onclick="stopProcessing()" style="display:none">■ Stop</button>
+          </div>
+          <p class="form-hint">Examples: <code>demo/sample.mp4</code> &nbsp;|&nbsp; <code>rtsp://192.168.1.1:554/stream</code> &nbsp;|&nbsp; <code>0</code> (webcam)</p>
+        </div>
+
+        <div class="progress-section" id="progressSection" style="display:none">
+          <div class="progress-stats">
+            <div class="pstat">
+              <span class="pstat-val" id="pFrames">0</span>
+              <span class="pstat-key">Frames Processed</span>
+            </div>
+            <div class="pstat">
+              <span class="pstat-val" id="pDetections">0</span>
+              <span class="pstat-key">Detections</span>
+            </div>
+            <div class="pstat">
+              <span class="pstat-val" id="pFps">0</span>
+              <span class="pstat-key">FPS</span>
+            </div>
+            <div class="pstat">
+              <span class="pstat-val" id="pStatus">—</span>
+              <span class="pstat-key">Status</span>
+            </div>
+          </div>
+          <div class="progress-bar-wrap">
+            <div class="progress-bar" id="progressBar"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card info-card">
+        <h3 class="card-title">How It Works</h3>
+        <div class="pipeline">
+          <div class="pipeline-step"><span class="step-num">1</span><div><strong>Frame Extraction</strong><p>OpenCV reads frames from any source — file, RTSP, or webcam.</p></div></div>
+          <div class="pipeline-arrow">→</div>
+          <div class="pipeline-step"><span class="step-num">2</span><div><strong>YOLOv8 Segmentation</strong><p>Each frame is analyzed to detect and segment objects like people, vehicles, objects.</p></div></div>
+          <div class="pipeline-arrow">→</div>
+          <div class="pipeline-step"><span class="step-num">3</span><div><strong>CLIP Embedding</strong><p>Each detected object is encoded into a 512-dimension semantic vector using CLIP.</p></div></div>
+          <div class="pipeline-arrow">→</div>
+          <div class="pipeline-step"><span class="step-num">4</span><div><strong>FAISS Index</strong><p>Vectors are stored in a fast cosine-similarity index for instant natural language retrieval.</p></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── ANALYTICS TAB ── -->
+    <section class="tab-panel" id="tab-analytics">
+      <div class="analytics-grid">
+        <div class="card stat-card">
+          <div class="stat-icon cyan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
+          <div>
+            <div class="stat-big" id="statTotal">0</div>
+            <div class="stat-name">Total Detections</div>
+          </div>
+        </div>
+        <div class="card stat-card">
+          <div class="stat-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><polyline points="8 21 12 17 16 21"/></svg></div>
+          <div>
+            <div class="stat-big" id="statLabels">0</div>
+            <div class="stat-name">Unique Classes</div>
+          </div>
+        </div>
+        <div class="card stat-card">
+          <div class="stat-icon purple"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg></div>
+          <div>
+            <div class="stat-big" id="statIndexed">0</div>
+            <div class="stat-name">Vectors Indexed</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card chart-card">
+        <div class="card-header-row">
+          <h2 class="card-title">Object Distribution</h2>
+          <button class="btn btn-sm" onclick="loadAnalytics()">↻ Refresh</button>
+        </div>
+        <canvas id="analyticsChart" height="320"></canvas>
+        <div class="empty-state hidden" id="analyticsEmpty">
+          <p>No data yet. Process a video to see analytics.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── DETECTIONS TAB ── -->
+    <section class="tab-panel" id="tab-detections">
+      <div class="card">
+        <div class="card-header-row">
+          <h2 class="card-title">Recent Detections</h2>
+          <button class="btn btn-sm" onclick="loadDetections()">↻ Refresh</button>
+        </div>
+        <div class="detections-grid" id="detectionsGrid">
+          <div class="empty-state" id="detectionsEmpty">
+            <div class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6M9 13h6M9 17h4"/></svg></div>
+            <p>No detections yet. Process a video to begin.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
