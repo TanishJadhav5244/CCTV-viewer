@@ -28,8 +28,8 @@ UPPER_PROMPTS = [f"a person wearing a {c} top" for c in COLOURS]
 LOWER_PROMPTS = [f"a person wearing {c} pants or skirt" for c in COLOURS]
 
 GENDER_PROMPTS = [
-    "a photo of a man",
-    "a photo of a woman",
+    "a photo of a man or boy",
+    "a photo of a woman or girl",
 ]
 
 AGE_PROMPTS = [
@@ -41,11 +41,11 @@ AGE_PROMPTS = [
 AGE_LABELS = ["child", "young", "adult", "elderly"]
 
 ACCESSORY_PROMPTS = {
-    "has_bag":     ("a person carrying a bag or backpack",
+    "has_bag":     ("a person carrying a bag, handbag, backpack or purse",
                     "a person with no bag"),
-    "has_hat":     ("a person wearing a hat or cap",
-                    "a person with no hat"),
-    "has_glasses": ("a person wearing glasses or sunglasses",
+    "has_hat":     ("a person wearing a hat, cap, baseball cap, beanie or headwear",
+                    "a person with no hat or cap"),
+    "has_glasses": ("a person wearing glasses, sunglasses or spectacles",
                     "a person with no glasses"),
 }
 
@@ -77,10 +77,10 @@ class AttributeExtractor:
             return
         from embedder import embedder
         embedder.load()
-        self._model = embedder._model
-        self._preprocess = embedder._preprocess
-        self._tokenize = embedder._tokenize
-        self._device = embedder._device
+        self._model = embedder.model
+        self._preprocess = embedder.preprocess
+        self._tokenize = embedder.tokenizer
+        self._device = embedder.device
         self._build_text_vecs()
 
     def _encode_texts(self, prompts):
@@ -111,10 +111,10 @@ class AttributeExtractor:
         return labels[int(np.argmax(sims))]
 
     def _binary(self, img_vec: np.ndarray, vecs: np.ndarray,
-                 threshold: float = 0.0) -> bool:
+                 threshold: float = -0.005) -> bool:
         sims = (img_vec @ vecs.T).flatten()
-        # positive class wins when its score is strictly higher
-        return bool(sims[0] > sims[1])
+        # positive class wins when its score is higher by at least threshold
+        return bool(sims[0] > sims[1] + threshold)
 
     def extract(self, pil_img: Image.Image, label: str) -> Dict:
         """
@@ -138,6 +138,7 @@ class AttributeExtractor:
         return {
             "gender":      gender,
             "age_group":   age,
+            "shirt_color": upper,   # alias used by the frontend badge
             "upper_color": upper,
             "lower_color": lower,
             **acc,

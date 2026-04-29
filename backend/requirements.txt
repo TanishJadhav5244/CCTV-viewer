@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+opencv-python
+ultralytics
+open_clip_torch
+torch
+torchvision
+Pillow
+python-dotenv
+aiofiles
+numpy
+# PostgreSQL + vector search
+psycopg2-binary
+sqlalchemy
+pgvector
+python-multipart

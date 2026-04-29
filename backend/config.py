@@ -15,11 +15,17 @@ DEMO_DIR = BASE_DIR / "demo"
 for d in [CROPS_DIR, VIDEOS_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
-# ── PostgreSQL ───────────────────────────────────────────────────────────────
+# ── Database & Index ─────────────────────────────────────────────────────────
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql://postgres:postgres@localhost:5432/cctv_analytics"
 )
+
+DB_DIR = DATA_DIR / "db"
+DB_DIR.mkdir(parents=True, exist_ok=True)
+
+SQLITE_PATH = DB_DIR / "detections.db"
+FAISS_INDEX_PATH = DB_DIR / "vector_index.faiss"
 
 # Models
 YOLO_MODEL    = os.getenv("YOLO_MODEL", "yolov8n-seg.pt")

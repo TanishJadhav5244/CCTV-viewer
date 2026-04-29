@@ -1,5 +1,7 @@
 import sys
 import os
+import io
+import csv
 import shutil
 import threading
 from pathlib import Path
@@ -8,7 +10,7 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -37,6 +39,7 @@ _processing_thread: Optional[threading.Thread] = None
 app.mount("/crops", StaticFiles(directory=str(CROPS_DIR)), name="crops")
 FRONTEND_DIR = BASE_DIR / "frontend"
 app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
+app.mount("/data/videos", StaticFiles(directory=str(VIDEOS_DIR)), name="videos")
 
 
 @app.get("/")
@@ -57,6 +60,8 @@ class ProcessRequest(BaseModel):
 class SearchRequest(BaseModel):
     query: str
     top_k: int = 12
+    label: Optional[str] = None   # e.g. 'person'
+    color: Optional[str] = None   # e.g. 'red'
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -95,6 +100,7 @@ def start_processing(req: ProcessRequest, background_tasks: BackgroundTasks):
         p = Path(source)
         if not p.is_absolute():
             p = BASE_DIR / source
+        print(f"[Debug] Checking path: {p}")
         if not p.exists():
             raise HTTPException(status_code=404, detail=f"File not found: {p}")
         source = str(p)
@@ -123,18 +129,96 @@ def search(req: SearchRequest):
     stats = db.get_stats()
     if stats["index_size"] == 0:
         return {"results": [], "message": "No detections indexed yet. Process a video first."}
-    results = search_by_text(req.query, db, top_k=req.top_k)
+    results = search_by_text(
+        req.query, db,
+        top_k=req.top_k,
+        label=req.label,
+        color=req.color,
+    )
     return {"query": req.query, "results": results}
 
 
 @app.get("/detections")
-def get_recent_detections(limit: int = 50):
-    return db.get_recent_detections(limit=limit)
+def get_recent_detections(
+    limit: int = 50,
+    label: Optional[str] = None,
+    color: Optional[str] = None,
+    source: Optional[str] = None,
+    gender: Optional[str] = None,
+    has_hat: Optional[bool] = None,
+    has_bag: Optional[bool] = None,
+):
+    return db.get_recent_detections(
+        limit=limit,
+        label=label,
+        color=color,
+        source=source,
+        gender=gender,
+        has_hat=has_hat,
+        has_bag=has_bag,
+    )
 
 
 @app.get("/stats")
 def get_stats():
     return db.get_stats()
+
+
+@app.get("/sources")
+def get_sources():
+    """Return distinct video sources with detection counts."""
+    return db.get_sources()
+
+
+@app.get("/sessions")
+def get_sessions():
+    """Return all processing sessions ordered by most recent first."""
+    return db.get_sessions()
+
+
+@app.get("/persons")
+def get_persons():
+    """Return person detections grouped by attribute signature for Re-ID gallery."""
+    return db.get_person_groups()
+
+
+@app.get("/timeline")
+def get_timeline(source: str):
+    """Return detections for a specific video source, ordered by video_time."""
+    rows = db.get_timeline(source)
+    if not rows:
+        return {"source": source, "detections": [], "duration": 0}
+    duration = max((r["video_time"] or 0) for r in rows)
+    return {"source": source, "detections": rows, "duration": round(duration, 2)}
+
+
+@app.get("/export/detections")
+def export_detections(source: Optional[str] = None):
+    """Stream all detections as a CSV file download."""
+    rows = db.get_all_detections_for_export(source=source)
+
+    def generate():
+        buf = io.StringIO()
+        fields = ["id", "timestamp", "video_src", "video_time", "frame_no",
+                  "label", "confidence", "crop_path", "bbox", "attributes"]
+        writer = csv.DictWriter(buf, fieldnames=fields, extrasaction="ignore")
+        writer.writeheader()
+        yield buf.getvalue()
+        for r in rows:
+            buf = io.StringIO()
+            # Flatten nested objects to strings
+            r["bbox"] = str(r.get("bbox", ""))
+            r["attributes"] = str(r.get("attributes", ""))
+            writer = csv.DictWriter(buf, fieldnames=fields, extrasaction="ignore")
+            writer.writerow(r)
+            yield buf.getvalue()
+
+    filename = "detections.csv" if not source else f"detections_{Path(source).stem}.csv"
+    return StreamingResponse(
+        generate(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.on_event("shutdown")

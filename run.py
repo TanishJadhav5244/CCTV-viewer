@@ -29,9 +29,9 @@ def main():
     for d in ["data/crops", "data/videos", "data/db", "demo"]:
         (BASE_DIR / d).mkdir(parents=True, exist_ok=True)
 
-    print(f"\n[Info] Backend: http://localhost:8000")
-    print(f"[Info] Dashboard: http://localhost:8000")
-    print(f"[Info] API Docs:  http://localhost:8000/docs\n")
+    print("\n" + "*" * 60)
+    print("  SERVER READY: http://localhost:8000")
+    print("*" * 60 + "\n")
 
     # Open browser after short delay
     def open_browser():

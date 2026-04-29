@@ -44,104 +44,123 @@ class VideoProcessor:
 
     def process(self, source: str):
         """Main processing loop. Runs in a background thread."""
-        self._stop_event.clear()
-        self._load_yolo()
-        embedder.load()
+        try:
+            self._stop_event.clear()
+            self._load_yolo()
+            embedder.load()
 
-        self.progress["status"] = "running"
-        self.progress["source"] = source
-        self.session_id = self.db.start_session(source)
+            self.progress["status"] = "running"
+            self.progress["source"] = source
+            self.session_id = self.db.start_session(source)
 
-        cap = cv2.VideoCapture(source if not source.isdigit() else int(source))
-        if not cap.isOpened():
-            self.progress["status"] = "error: could not open source"
-            return
+            cap = cv2.VideoCapture(source if not source.isdigit() else int(source))
+            if not cap.isOpened():
+                self.progress["status"] = "error: could not open source"
+                return
 
-        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
-        self.progress["total_frames"] = total
-        self.db.update_session(self.session_id, total_frames=total)
+            total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
+            fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+            self.progress["total_frames"] = total
+            self.db.update_session(self.session_id, total_frames=total)
 
-        frame_no = 0
-        det_count = 0
-        t0 = time.time()
+            # Normalize video source for frontend (e.g. data/videos/test.mp4 -> videos/test.mp4)
+            norm_source = source
+            try:
+                # If it's a file inside our project, make it relative to the 'data' parent
+                source_path = Path(source)
+                if source_path.exists() and "data" in source_path.parts:
+                    # Find 'data' and take everything from there
+                    data_idx = source_path.parts.index("data")
+                    norm_source = "/".join(source_path.parts[data_idx:])
+            except:
+                pass
 
-        while not self._stop_event.is_set():
-            ret, frame = cap.read()
-            if not ret:
-                break
+            frame_no = 0
+            det_count = 0
+            t0 = time.time()
 
-            frame_no += 1
-            if frame_no % FRAME_SKIP != 0:
-                continue
+            while not self._stop_event.is_set():
+                ret, frame = cap.read()
+                if not ret:
+                    break
 
-            self.progress["processed_frames"] = frame_no
-            elapsed = time.time() - t0
-            self.progress["current_fps"] = round(frame_no / elapsed, 2) if elapsed > 0 else 0
-
-            # Run YOLOv8 segmentation
-            results = self.model(frame, verbose=False, conf=CONFIDENCE_THRESHOLD,
-                                  classes=YOLO_CLASSES_OF_INTEREST)
-
-            timestamp = datetime.now().isoformat()
-
-            for result in results:
-                boxes = result.boxes
-                if boxes is None:
+                frame_no += 1
+                if frame_no % FRAME_SKIP != 0:
                     continue
 
-                for i, box in enumerate(boxes):
-                    cls_id = int(box.cls[0])
-                    label = self.model.names[cls_id]
-                    conf = float(box.conf[0])
-                    x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                self.progress["processed_frames"] = frame_no
+                elapsed = time.time() - t0
+                self.progress["current_fps"] = round(frame_no / elapsed, 2) if elapsed > 0 else 0
 
-                    # Crop object from frame
-                    h, w = frame.shape[:2]
-                    x1c, y1c = max(0, x1), max(0, y1)
-                    x2c, y2c = min(w, x2), min(h, y2)
-                    crop_bgr = frame[y1c:y2c, x1c:x2c]
-                    if crop_bgr.size == 0:
+                # Run YOLOv8 segmentation
+                results = self.model(frame, verbose=False, conf=CONFIDENCE_THRESHOLD,
+                                      classes=YOLO_CLASSES_OF_INTEREST)
+
+                timestamp = datetime.now().isoformat()
+
+                for result in results:
+                    boxes = result.boxes
+                    if boxes is None:
                         continue
 
-                    # Save crop as JPEG
-                    crop_name = f"{uuid.uuid4().hex}.jpg"
-                    crop_path = CROPS_DIR / crop_name
-                    cv2.imwrite(str(crop_path), crop_bgr)
+                    for i, box in enumerate(boxes):
+                        cls_id = int(box.cls[0])
+                        label = self.model.names[cls_id]
+                        conf = float(box.conf[0])
+                        x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
 
-                    # Generate CLIP embedding
-                    crop_pil = Image.fromarray(cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB))
-                    embedding = embedder.embed_image_pil(crop_pil)
+                        # Crop object from frame
+                        h, w = frame.shape[:2]
+                        x1c, y1c = max(0, x1), max(0, y1)
+                        x2c, y2c = min(w, x2), min(h, y2)
+                        crop_bgr = frame[y1c:y2c, x1c:x2c]
+                        if crop_bgr.size == 0:
+                            continue
 
-                    # Extract person attributes (colour, gender, accessories)
-                    attrs = attribute_extractor.extract(crop_pil, label)
+                        # Save crop as JPEG
+                        crop_name = f"{uuid.uuid4().hex}.jpg"
+                        crop_path = CROPS_DIR / crop_name
+                        cv2.imwrite(str(crop_path), crop_bgr)
 
-                    # Store in PostgreSQL + pgvector
-                    self.db.insert_detection(
-                        timestamp=timestamp,
-                        video_src=source,
-                        frame_no=frame_no,
-                        label=label,
-                        confidence=conf,
-                        crop_path=str(crop_path.relative_to(CROPS_DIR.parent.parent)),
-                        bbox=[x1, y1, x2, y2],
-                        embedding=embedding,
-                        attributes=attrs,
-                    )
-                    det_count += 1
+                        # Generate CLIP embedding
+                        crop_pil = Image.fromarray(cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB))
+                        embedding = embedder.embed_image_pil(crop_pil)
 
-            self.progress["total_detections"] = det_count
+                        # Extract person attributes (colour, gender, accessories)
+                        attrs = attribute_extractor.extract(crop_pil, label)
+
+                        # Store in PostgreSQL + pgvector
+                        self.db.insert_detection(
+                            timestamp=timestamp,
+                            video_src=norm_source,
+                            frame_no=frame_no,
+                            video_time=frame_no / fps,
+                            label=label,
+                            confidence=conf,
+                            crop_path=str(crop_path.relative_to(CROPS_DIR.parent.parent)),
+                            bbox=[x1, y1, x2, y2],
+                            embedding=embedding,
+                            attributes=attrs,
+                        )
+                        det_count += 1
+
+                self.progress["total_detections"] = det_count
+                self.db.update_session(
+                    self.session_id,
+                    processed_frames=frame_no,
+                    total_detections=det_count,
+                )
+
+            cap.release()
             self.db.update_session(
                 self.session_id,
-                processed_frames=frame_no,
+                status="finished",
+                finished_at=datetime.now().isoformat(),
                 total_detections=det_count,
             )
-
-        cap.release()
-        self.db.update_session(
-            self.session_id,
-            status="finished",
-            finished_at=datetime.now().isoformat(),
-            total_detections=det_count,
-        )
-        self.progress["status"] = "finished"
-        print(f"[Processor] Done. {det_count} detections from {frame_no} frames.")
+            self.progress["status"] = "finished"
+            print(f"[Processor] Done. {det_count} detections from {frame_no} frames.")
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.progress["status"] = f"error: {str(e)}"
