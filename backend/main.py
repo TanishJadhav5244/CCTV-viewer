@@ -1,24 +1,24 @@
 import sys
 import os
+import shutil
 import threading
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-# Ensure backend dir is in path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from config import CROPS_DIR, DATA_DIR, BASE_DIR
+from config import CROPS_DIR, DATA_DIR, BASE_DIR, VIDEOS_DIR
 from database import DetectionDB
 from processor import VideoProcessor
 from search import search_by_text
 
-app = FastAPI(title="CCTV Deep Learning Analytics", version="1.0.0")
+app = FastAPI(title="CCTV Deep Learning Analytics", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -33,11 +33,8 @@ db = DetectionDB()
 processor = VideoProcessor(db)
 _processing_thread: Optional[threading.Thread] = None
 
-
 # ── Static files ──────────────────────────────────────────────────────────────
-# Serve saved crop images
 app.mount("/crops", StaticFiles(directory=str(CROPS_DIR)), name="crops")
-# Serve frontend
 FRONTEND_DIR = BASE_DIR / "frontend"
 app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
@@ -54,7 +51,7 @@ def serve_demo():
 
 # ── Models ────────────────────────────────────────────────────────────────────
 class ProcessRequest(BaseModel):
-    source: str  # path to video file, RTSP URL, or "0" for webcam
+    source: str
 
 
 class SearchRequest(BaseModel):
@@ -63,14 +60,37 @@ class SearchRequest(BaseModel):
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
+
+@app.post("/upload")
+async def upload_video(file: UploadFile = File(...)):
+    """Upload a video file and start processing it automatically."""
+    global _processing_thread
+    if processor.progress["status"] == "running":
+        raise HTTPException(status_code=400, detail="Processing already in progress.")
+
+    # Save uploaded file
+    dest = VIDEOS_DIR / file.filename
+    with open(dest, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    source = str(dest)
+
+    def run():
+        processor.process(source)
+
+    _processing_thread = threading.Thread(target=run, daemon=True)
+    _processing_thread.start()
+    return {"status": "started", "source": source, "filename": file.filename}
+
+
 @app.post("/process")
 def start_processing(req: ProcessRequest, background_tasks: BackgroundTasks):
+    """Start processing from a path / RTSP URL / webcam index."""
     global _processing_thread
     if processor.progress["status"] == "running":
         raise HTTPException(status_code=400, detail="Processing already in progress.")
 
     source = req.source
-    # Resolve relative paths from the project root
     if not source.startswith("rtsp://") and not source.isdigit():
         p = Path(source)
         if not p.is_absolute():
@@ -100,7 +120,8 @@ def get_status():
 
 @app.post("/search")
 def search(req: SearchRequest):
-    if db.index.ntotal == 0:
+    stats = db.get_stats()
+    if stats["index_size"] == 0:
         return {"results": [], "message": "No detections indexed yet. Process a video first."}
     results = search_by_text(req.query, db, top_k=req.top_k)
     return {"query": req.query, "results": results}

@@ -1,66 +1,112 @@
-import sqlite3
+"""
+database.py — PostgreSQL + pgvector backend.
+
+Replaces the old SQLite + FAISS implementation.
+Uses SQLAlchemy for ORM and pgvector for 512-dim cosine search.
+"""
+
 import json
 import numpy as np
-import faiss
 from datetime import datetime
-from pathlib import Path
 from typing import List, Dict, Optional
 
-from config import (
-    SQLITE_DB_PATH, FAISS_INDEX_PATH, FAISS_META_PATH, EMBEDDING_DIM
+from sqlalchemy import (
+    create_engine, text,
+    Column, Integer, Float, String, Text, DateTime, JSON
 )
+from sqlalchemy.orm import declarative_base, sessionmaker, Session
+from pgvector.sqlalchemy import Vector
+
+from config import DATABASE_URL, EMBEDDING_DIM
+
+# ── Engine & Session ─────────────────────────────────────────────────────────
+engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_size=5)
+SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+Base = declarative_base()
 
 
+# ── ORM Models ───────────────────────────────────────────────────────────────
+class VideoRecord(Base):
+    __tablename__ = "videos"
+
+    id            = Column(Integer, primary_key=True, autoincrement=True)
+    source        = Column(Text, nullable=False)
+    status        = Column(String(32), default="pending")
+    total_frames  = Column(Integer, default=0)
+    created_at    = Column(DateTime, default=datetime.utcnow)
+    finished_at   = Column(DateTime, nullable=True)
+
+
+class DetectionRecord(Base):
+    __tablename__ = "detections"
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    video_id   = Column(Integer, nullable=True)
+    timestamp  = Column(Text, nullable=False)
+    frame_no   = Column(Integer, nullable=False)
+    label      = Column(String(128), nullable=False)
+    confidence = Column(Float, nullable=False)
+    crop_path  = Column(Text, nullable=True)
+    bbox       = Column(Text, nullable=True)   # JSON string
+    attributes = Column(JSON, nullable=True)   # person attributes dict
+    embedding  = Column(Vector(EMBEDDING_DIM), nullable=True)
+
+
+class SessionRecord(Base):
+    __tablename__ = "processing_sessions"
+
+    id               = Column(Integer, primary_key=True, autoincrement=True)
+    source           = Column(Text, nullable=True)
+    started_at       = Column(Text, nullable=True)
+    finished_at      = Column(Text, nullable=True)
+    total_frames     = Column(Integer, default=0)
+    processed_frames = Column(Integer, default=0)
+    total_detections = Column(Integer, default=0)
+    status           = Column(String(32), default="running")
+
+
+# ── DB init ───────────────────────────────────────────────────────────────────
+def init_db():
+    """Create pgvector extension and all tables."""
+    with engine.connect() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        conn.commit()
+    Base.metadata.create_all(bind=engine)
+    print("[DB] Tables created / verified.")
+
+
+# ── DetectionDB class (same interface as old version) ────────────────────────
 class DetectionDB:
+    """Drop-in replacement for the old SQLite+FAISS DetectionDB."""
+
     def __init__(self):
-        self.conn = sqlite3.connect(str(SQLITE_DB_PATH), check_same_thread=False)
-        self.conn.row_factory = sqlite3.Row
-        self._init_db()
-        self.index, self.id_map = self._load_or_create_index()
+        init_db()
+        self._db: Session = SessionLocal()
 
-    def _init_db(self):
-        self.conn.execute("""
-            CREATE TABLE IF NOT EXISTS detections (
-                id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp  TEXT NOT NULL,
-                video_src  TEXT,
-                frame_no   INTEGER,
-                label      TEXT,
-                confidence REAL,
-                crop_path  TEXT,
-                bbox       TEXT
-            )
-        """)
-        self.conn.execute("""
-            CREATE TABLE IF NOT EXISTS processing_sessions (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                source      TEXT,
-                started_at  TEXT,
-                finished_at TEXT,
-                total_frames INTEGER DEFAULT 0,
-                processed_frames INTEGER DEFAULT 0,
-                total_detections INTEGER DEFAULT 0,
-                status      TEXT DEFAULT 'running'
-            )
-        """)
-        self.conn.commit()
+    # ── Session management ────────────────────────────────────────────────
+    def start_session(self, source: str) -> int:
+        rec = SessionRecord(
+            source=source,
+            started_at=datetime.utcnow().isoformat(),
+            status="running",
+        )
+        self._db.add(rec)
+        self._db.commit()
+        self._db.refresh(rec)
+        return rec.id
 
-    def _load_or_create_index(self):
-        """Load existing FAISS index or create a new one."""
-        if FAISS_INDEX_PATH.exists() and FAISS_META_PATH.exists():
-            index = faiss.read_index(str(FAISS_INDEX_PATH))
-            with open(FAISS_META_PATH) as f:
-                id_map = json.load(f)
-            return index, id_map
-        # Inner product on L2-normalized vectors = cosine similarity
-        index = faiss.IndexFlatIP(EMBEDDING_DIM)
-        return index, []
+    def update_session(self, session_id: int, **kwargs):
+        rec = self._db.get(SessionRecord, session_id)
+        if rec:
+            for k, v in kwargs.items():
+                setattr(rec, k, v)
+            self._db.commit()
 
-    def save_index(self):
-        faiss.write_index(self.index, str(FAISS_INDEX_PATH))
-        with open(FAISS_META_PATH, "w") as f:
-            json.dump(self.id_map, f)
+    def get_session(self, session_id: int) -> Optional[Dict]:
+        rec = self._db.get(SessionRecord, session_id)
+        return self._row_to_dict(rec) if rec else None
 
+    # ── Detections ────────────────────────────────────────────────────────
     def insert_detection(
         self,
         timestamp: str,
@@ -71,93 +117,132 @@ class DetectionDB:
         crop_path: str,
         bbox: list,
         embedding: np.ndarray,
+        attributes: dict = None,
     ) -> int:
-        cur = self.conn.execute(
-            """INSERT INTO detections (timestamp, video_src, frame_no, label, confidence, crop_path, bbox)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (timestamp, video_src, frame_no, label, round(confidence, 4),
-             crop_path, json.dumps(bbox)),
+        vec = embedding.astype(np.float32).tolist()
+        rec = DetectionRecord(
+            timestamp=timestamp,
+            frame_no=frame_no,
+            label=label,
+            confidence=round(float(confidence), 4),
+            crop_path=crop_path,
+            bbox=json.dumps(bbox),
+            attributes=attributes or {},
+            embedding=vec,
         )
-        self.conn.commit()
-        row_id = cur.lastrowid
+        self._db.add(rec)
+        self._db.commit()
+        self._db.refresh(rec)
+        return rec.id
 
-        # Normalize and add to FAISS
-        vec = embedding.astype(np.float32).reshape(1, -1)
-        faiss.normalize_L2(vec)
-        self.index.add(vec)
-        self.id_map.append(row_id)
+    def get_recent_detections(
+        self,
+        limit: int = 50,
+        label: str = None,
+        color: str = None,
+    ) -> List[Dict]:
+        q = self._db.query(DetectionRecord)
+        if label:
+            q = q.filter(DetectionRecord.label == label)
+        if color:
+            # filter where upper_color OR lower_color matches
+            q = q.filter(
+                text(
+                    "(attributes->>'upper_color' = :c OR "
+                    " attributes->>'lower_color' = :c)"
+                ).bindparams(c=color)
+            )
+        rows = q.order_by(DetectionRecord.id.desc()).limit(limit).all()
+        return [self._detection_to_dict(r) for r in rows]
 
-        # Persist periodically
-        if len(self.id_map) % 100 == 0:
-            self.save_index()
+    # ── Vector search ─────────────────────────────────────────────────────
+    def search(
+        self,
+        query_vec: np.ndarray,
+        top_k: int = 12,
+        label: str = None,
+        color: str = None,
+    ) -> List[Dict]:
+        """Cosine similarity search using pgvector <=> operator.
 
-        return row_id
-
-    def search(self, query_vec: np.ndarray, top_k: int = 10) -> List[Dict]:
-        if self.index.ntotal == 0:
+        Optional hard filters:
+          label — restrict to one object class e.g. 'person'
+          color — restrict to a clothing colour e.g. 'red'
+        """
+        total = self._db.query(DetectionRecord).count()
+        if total == 0:
             return []
 
-        vec = query_vec.astype(np.float32).reshape(1, -1)
-        faiss.normalize_L2(vec)
-        k = min(top_k, self.index.ntotal)
-        scores, indices = self.index.search(vec, k)
+        vec_list = query_vec.astype(np.float32).tolist()
+        k = min(top_k * 4, total)   # fetch more, filter, then trim
 
+        q = self._db.query(DetectionRecord)
+        if label:
+            q = q.filter(DetectionRecord.label == label)
+        if color:
+            q = q.filter(
+                text(
+                    "(attributes->>'upper_color' = :c OR "
+                    " attributes->>'lower_color' = :c)"
+                ).bindparams(c=color)
+            )
+        rows = (
+            q.order_by(DetectionRecord.embedding.cosine_distance(vec_list))
+            .limit(k)
+            .all()
+        )
+
+        # Compute similarity scores
         results = []
-        for score, idx in zip(scores[0], indices[0]):
-            if idx < 0 or idx >= len(self.id_map):
-                continue
-            row_id = self.id_map[idx]
-            row = self.conn.execute(
-                "SELECT * FROM detections WHERE id = ?", (row_id,)
-            ).fetchone()
-            if row:
-                results.append({
-                    "id": row["id"],
-                    "timestamp": row["timestamp"],
-                    "label": row["label"],
-                    "confidence": row["confidence"],
-                    "crop_path": row["crop_path"],
-                    "score": round(float(score), 4),
-                })
+        vec_np = query_vec.astype(np.float32)
+        for r in rows[:top_k]:
+            d = self._detection_to_dict(r)
+            if r.embedding is not None:
+                emb = np.array(r.embedding, dtype=np.float32)
+                sim = float(np.dot(vec_np, emb) /
+                            (np.linalg.norm(vec_np) * np.linalg.norm(emb) + 1e-9))
+                d["score"] = round(sim, 4)
+            else:
+                d["score"] = 0.0
+            results.append(d)
         return results
 
-    def get_recent_detections(self, limit: int = 50) -> List[Dict]:
-        rows = self.conn.execute(
-            "SELECT * FROM detections ORDER BY id DESC LIMIT ?", (limit,)
-        ).fetchall()
-        return [dict(r) for r in rows]
-
+    # ── Stats ─────────────────────────────────────────────────────────────
     def get_stats(self) -> Dict:
-        total = self.conn.execute("SELECT COUNT(*) FROM detections").fetchone()[0]
-        labels = self.conn.execute(
-            "SELECT label, COUNT(*) as cnt FROM detections GROUP BY label ORDER BY cnt DESC"
+        total = self._db.query(DetectionRecord).count()
+        rows = self._db.execute(
+            text(
+                "SELECT label, COUNT(*) as cnt FROM detections "
+                "GROUP BY label ORDER BY cnt DESC"
+            )
         ).fetchall()
         return {
             "total_detections": total,
-            "label_counts": {r["label"]: r["cnt"] for r in labels},
-            "index_size": self.index.ntotal,
+            "label_counts": {r[0]: r[1] for r in rows},
+            "index_size": total,   # every detection is indexed in pgvector
         }
 
-    def start_session(self, source: str) -> int:
-        cur = self.conn.execute(
-            "INSERT INTO processing_sessions (source, started_at, status) VALUES (?, ?, 'running')",
-            (source, datetime.now().isoformat()),
-        )
-        self.conn.commit()
-        return cur.lastrowid
-
-    def update_session(self, session_id: int, **kwargs):
-        sets = ", ".join(f"{k} = ?" for k in kwargs)
-        vals = list(kwargs.values()) + [session_id]
-        self.conn.execute(f"UPDATE processing_sessions SET {sets} WHERE id = ?", vals)
-        self.conn.commit()
-
-    def get_session(self, session_id: int) -> Optional[Dict]:
-        row = self.conn.execute(
-            "SELECT * FROM processing_sessions WHERE id = ?", (session_id,)
-        ).fetchone()
-        return dict(row) if row else None
+    # ── Compat stubs (FAISS used save_index — now a no-op) ────────────────
+    def save_index(self):
+        pass   # pgvector persists automatically
 
     def close(self):
-        self.save_index()
-        self.conn.close()
+        self._db.close()
+
+    # ── Helpers ───────────────────────────────────────────────────────────
+    @staticmethod
+    def _detection_to_dict(r: DetectionRecord) -> Dict:
+        return {
+            "id":         r.id,
+            "timestamp":  r.timestamp,
+            "frame_no":   r.frame_no,
+            "label":      r.label,
+            "confidence": r.confidence,
+            "crop_path":  r.crop_path,
+            "bbox":       json.loads(r.bbox) if r.bbox else None,
+            "attributes": r.attributes or {},
+        }
+
+    @staticmethod
+    def _row_to_dict(r) -> Dict:
+        return {c.name: getattr(r, c.name) for c in r.__table__.columns}

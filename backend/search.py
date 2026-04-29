@@ -6,7 +6,7 @@ from database import DetectionDB
 def search_by_text(query: str, db: DetectionDB, top_k: int = 12) -> List[Dict]:
     """
     Encode a natural-language query with CLIP and retrieve the most
-    visually similar object detections from the FAISS index.
+    visually similar object detections using pgvector cosine search.
     """
     embedder.load()
     query_vec = embedder.embed_text(query)

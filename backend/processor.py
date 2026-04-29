@@ -12,6 +12,7 @@ from config import (
     YOLO_MODEL, CONFIDENCE_THRESHOLD, FRAME_SKIP, CROPS_DIR, YOLO_CLASSES_OF_INTEREST
 )
 from embedder import embedder
+from attributes import attribute_extractor
 from database import DetectionDB
 
 
@@ -111,7 +112,10 @@ class VideoProcessor:
                     crop_pil = Image.fromarray(cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB))
                     embedding = embedder.embed_image_pil(crop_pil)
 
-                    # Store in DB + FAISS
+                    # Extract person attributes (colour, gender, accessories)
+                    attrs = attribute_extractor.extract(crop_pil, label)
+
+                    # Store in PostgreSQL + pgvector
                     self.db.insert_detection(
                         timestamp=timestamp,
                         video_src=source,
@@ -121,6 +125,7 @@ class VideoProcessor:
                         crop_path=str(crop_path.relative_to(CROPS_DIR.parent.parent)),
                         bbox=[x1, y1, x2, y2],
                         embedding=embedding,
+                        attributes=attrs,
                     )
                     det_count += 1
 
@@ -132,7 +137,6 @@ class VideoProcessor:
             )
 
         cap.release()
-        self.db.save_index()
         self.db.update_session(
             self.session_id,
             status="finished",
