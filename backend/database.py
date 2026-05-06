@@ -60,9 +60,18 @@ class DetectionDB:
                 total_frames INTEGER DEFAULT 0,
                 processed_frames INTEGER DEFAULT 0,
                 total_detections INTEGER DEFAULT 0,
-                status TEXT DEFAULT 'running'
+                status TEXT DEFAULT 'running',
+                video_width INTEGER DEFAULT 0,
+                video_height INTEGER DEFAULT 0
             )
         """)
+        # Migration: add resolution columns if not present (existing DBs)
+        cur.execute("PRAGMA table_info(processing_sessions)")
+        session_cols = [info[1] for info in cur.fetchall()]
+        if "video_width" not in session_cols:
+            cur.execute("ALTER TABLE processing_sessions ADD COLUMN video_width INTEGER DEFAULT 0")
+        if "video_height" not in session_cols:
+            cur.execute("ALTER TABLE processing_sessions ADD COLUMN video_height INTEGER DEFAULT 0")
         conn.commit()
         conn.close()
         print(f"[DB] SQLite initialized at {self.sqlite_path}")
@@ -393,6 +402,49 @@ class DetectionDB:
 
         # Sort by appearance count descending
         return sorted(groups.values(), key=lambda g: g["count"], reverse=True)
+
+    def delete_session(self, session_id: int) -> bool:
+        """Delete a session row and all detections from that source, then rebuild FAISS."""
+        conn = sqlite3.connect(self.sqlite_path)
+        cur = conn.cursor()
+        cur.execute("SELECT source FROM processing_sessions WHERE id = ?", (session_id,))
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            return False
+        source = row[0]
+        # Remove session row
+        cur.execute("DELETE FROM processing_sessions WHERE id = ?", (session_id,))
+        # Remove associated detections
+        if source:
+            cur.execute("DELETE FROM detections WHERE video_src = ?", (source,))
+        conn.commit()
+        conn.close()
+        self._rebuild_faiss()
+        return True
+
+    def clear_all(self):
+        """Delete all detections and all sessions, reset FAISS index."""
+        conn = sqlite3.connect(self.sqlite_path)
+        cur = conn.cursor()
+        cur.execute("DELETE FROM detections")
+        cur.execute("DELETE FROM processing_sessions")
+        conn.commit()
+        conn.close()
+        # Reset FAISS
+        self.index = faiss.IndexFlatIP(self.dim)
+        self.save_index()
+        print("[DB] All detections cleared.")
+
+    def _rebuild_faiss(self):
+        """Rebuild FAISS index from the embeddings currently in SQLite.
+        Since embeddings are not stored in SQLite, we clear FAISS and
+        leave a note — vector index will be stale until next run."""
+        # We cannot rebuild without raw embeddings, so just truncate the FAISS index.
+        # The index will be rebuilt fresh on the next processing run.
+        self.index = faiss.IndexFlatIP(self.dim)
+        self.save_index()
+        print("[DB] FAISS index reset after session deletion.")
 
     def save_index(self):
         """Persist the FAISS index to disk."""

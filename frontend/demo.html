@@ -1007,8 +1007,70 @@
                 grid-template-columns: repeat(2, 1fr);
             }
         }
+
+        /* ── Processing-complete toast ── */
+        .proc-toast {
+            position: fixed;
+            bottom: 28px;
+            right: 28px;
+            background: linear-gradient(135deg, #0d1530, #111d3c);
+            border: 1px solid var(--green);
+            border-radius: 14px;
+            padding: 16px 22px;
+            box-shadow: 0 8px 40px rgba(16, 185, 129, .22);
+            display: flex;
+            align-items: flex-start;
+            gap: 14px;
+            z-index: 9000;
+            min-width: 280px;
+            max-width: 380px;
+            animation: toastIn .35s cubic-bezier(.22,1,.36,1) forwards;
+            pointer-events: auto;
+        }
+        .proc-toast.hide {
+            animation: toastOut .3s ease forwards;
+        }
+        @keyframes toastIn  { from { opacity:0; transform:translateY(20px) scale(.97); } to { opacity:1; transform:none; } }
+        @keyframes toastOut { to   { opacity:0; transform:translateY(16px) scale(.97); } }
+        .proc-toast-icon {
+            width: 36px; height: 36px; border-radius: 10px;
+            background: rgba(16, 185, 129, .15);
+            display: grid; place-items: center; flex-shrink: 0;
+            color: var(--green);
+        }
+        .proc-toast-icon svg { width: 18px; height: 18px; }
+        .proc-toast-title { font-size: 13px; font-weight: 700; color: var(--text1); }
+        .proc-toast-body  { font-size: 12px; color: var(--text2); margin-top: 3px; line-height: 1.5; }
+        .proc-toast-close {
+            margin-left: auto; background: none; border: none;
+            color: var(--text3); cursor: pointer; font-size: 16px; line-height: 1;
+            align-self: flex-start; padding: 0 2px;
+        }
+        /* ── Resolution & meta badges inside progress section ── */
+        .proc-meta-row {
+            display: flex; gap: 10px; flex-wrap: wrap;
+            margin-top: 10px; margin-bottom: 4px;
+        }
+        .proc-meta-badge {
+            padding: 3px 10px;
+            border-radius: 999px;
+            border: 1px solid var(--border2);
+            background: var(--surface2);
+            font-size: 11px;
+            color: var(--text2);
+            display: flex; align-items: center; gap: 5px;
+        }
+        .proc-meta-badge svg { width: 11px; height: 11px; color: var(--accent); }
+        /* Wider stats grid */
+        .progress-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+            gap: 12px;
+            margin-bottom: 14px;
+        }
     </style>
 </head>
+
 
 <body>
 
@@ -1126,10 +1188,23 @@
                             <div class="stage-step" id="stage3">FAISS Index</div>
                         </div>
                         <div style="height:16px"></div>
+
+                        <!-- Video metadata badges (resolution, CLAHE) -->
+                        <div class="proc-meta-row" id="procMetaRow" style="display:none">
+                            <span class="proc-meta-badge" id="procResBadge">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+                                <span id="procResLabel">—</span>
+                            </span>
+                            <span class="proc-meta-badge">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83"/></svg>
+                                CLAHE ON
+                            </span>
+                        </div>
+
                         <div class="progress-stats">
                             <div class="pstat">
                                 <span class="pstat-val" id="pFrames">0</span>
-                                <span class="pstat-key">Frames Processed</span>
+                                <span class="pstat-key">Frames</span>
                             </div>
                             <div class="pstat">
                                 <span class="pstat-val" id="pDetections">0</span>
@@ -1138,6 +1213,18 @@
                             <div class="pstat">
                                 <span class="pstat-val" id="pFps">0</span>
                                 <span class="pstat-key">FPS</span>
+                            </div>
+                            <div class="pstat">
+                                <span class="pstat-val" id="pDetRate">0</span>
+                                <span class="pstat-key">Det/sec</span>
+                            </div>
+                            <div class="pstat">
+                                <span class="pstat-val" id="pEta" style="font-size:16px">—</span>
+                                <span class="pstat-key">ETA</span>
+                            </div>
+                            <div class="pstat">
+                                <span class="pstat-val" id="pSkipped">0</span>
+                                <span class="pstat-key">Skipped</span>
                             </div>
                             <div class="pstat">
                                 <span class="pstat-val" id="pStatus">—</span>
@@ -1150,6 +1237,7 @@
                         <div class="progress-label" id="progressLabel">0 / 0 frames</div>
                     </div>
                 </div>
+
 
                 <div class="card">
                     <h3 class="card-title">Pipeline — How It Works</h3>
@@ -1566,6 +1654,22 @@
         renderChangelog();
         renderChart();
     </script>
+
+    <!-- ── Processing complete toast ── -->
+    <div id="procToast" class="proc-toast" style="display:none">
+        <div class="proc-toast-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <polyline points="20 6 9 17 4 12"/>
+            </svg>
+        </div>
+        <div>
+            <div class="proc-toast-title">Processing Complete ✓</div>
+            <div class="proc-toast-body" id="procToastBody">—</div>
+        </div>
+        <button class="proc-toast-close" onclick="dismissToast()" title="Dismiss">×</button>
+    </div>
+
 </body>
+
 
 </html>

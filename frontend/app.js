@@ -220,16 +220,41 @@ document.querySelectorAll('.nav-item').forEach(btn => {
     });
 });
 
-// ── Keyboard shortcut: '/' focuses search ────────────────────────────────────
+// ── Keyboard Shortcuts ───────────────────────────────────────────────────────
+const TAB_KEYS = { '1':'search','2':'process','3':'analytics','4':'detections','5':'timeline','6':'persons','7':'sessions' };
+
+function toggleShortcuts() {
+    const m = document.getElementById('shortcutsModal');
+    m.classList.toggle('open');
+}
+
+document.getElementById('shortcutsClose')?.addEventListener('click', () => {
+    document.getElementById('shortcutsModal').classList.remove('open');
+});
+document.getElementById('shortcutsModal')?.addEventListener('click', e => {
+    if (e.target === e.currentTarget) document.getElementById('shortcutsModal').classList.remove('open');
+});
+
 document.addEventListener('keydown', e => {
-    if (e.key === '/' && document.activeElement.tagName !== 'INPUT'
-                      && document.activeElement.tagName !== 'TEXTAREA') {
+    const tag = document.activeElement.tagName;
+    const isInput = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+    if (e.key === '/' && !isInput) {
         e.preventDefault();
-        // Switch to search tab first
         document.querySelector('[data-tab="search"]')?.click();
         document.getElementById('searchInput')?.focus();
     }
-    if (e.key === 'Escape') closeVideoModal();
+    if (e.key === 'Escape') {
+        closeVideoModal();
+        document.getElementById('shortcutsModal')?.classList.remove('open');
+    }
+    if (e.key === '?' && !isInput) {
+        e.preventDefault();
+        toggleShortcuts();
+    }
+    // Number shortcuts 1-7 for tab switching
+    if (!isInput && TAB_KEYS[e.key]) {
+        document.querySelector(`[data-tab="${TAB_KEYS[e.key]}"]`)?.click();
+    }
 });
 
 // ── Search ──────────────────────────────────────────────────────────────────
@@ -364,6 +389,9 @@ async function doSearch() {
                  onerror="this.style.display='none'"/>
             <span class="result-score-badge">${score}%</span>
             ${hasVideo ? '<span class="play-overlay"><svg viewBox="0 0 24 24" fill="currentColor" width="28" height="28"><polygon points="5 3 19 12 5 21 5 3"/></svg></span>' : ''}
+            <a class="dl-btn" href="${imgSrc}" download title="Download crop">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            </a>
           </div>
           <div class="result-info">
             <div class="result-label">${r.label} ${timeBadge}</div>
@@ -387,17 +415,63 @@ async function doSearch() {
     }
 }
 
+// ── Live frame preview ──────────────────────────────────────────────────────
+let _liveFramePoller = null;
+
+function startLivePreview() {
+    const card = document.getElementById('liveFrameCard');
+    const img  = document.getElementById('liveFrameImg');
+    const overlay = document.getElementById('liveFrameOverlay');
+    const label = document.getElementById('liveFrameLabel');
+    card?.classList.remove('hidden');
+    let firstFrame = true;
+
+    _liveFramePoller = setInterval(async () => {
+        try {
+            const res = await fetch(`${API}/frame`, { cache: 'no-store' });
+            if (res.status === 204 || !res.ok) return;
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            img.onload = () => URL.revokeObjectURL(url);
+            img.src = url;
+            if (firstFrame) {
+                firstFrame = false;
+                overlay?.classList.add('hidden');
+            }
+            // Update frame label
+            const stats = processor_progress_cache;
+            if (stats && label) {
+                label.textContent = `Frame ${(stats.processed_frames||0).toLocaleString()} / ${(stats.total_frames||0).toLocaleString()}`;
+            }
+        } catch { /* silent */ }
+    }, 1200);
+}
+
+function stopLivePreview() {
+    if (_liveFramePoller) { clearInterval(_liveFramePoller); _liveFramePoller = null; }
+    document.getElementById('liveFrameCard')?.classList.add('hidden');
+    const overlay = document.getElementById('liveFrameOverlay');
+    if (overlay) overlay.classList.remove('hidden');
+}
+
+let processor_progress_cache = {};
+
 // ── Process Video ───────────────────────────────────────────────────────────
 async function startProcessing() {
     const source = document.getElementById('videoSource').value.trim();
     if (!source) return;
 
-    // Show progress immediately so the user sees feedback right away
     document.getElementById('progressSection').style.display = 'block';
     document.getElementById('pStatus').textContent = 'Starting…';
     document.getElementById('pFrames').textContent = '0';
     document.getElementById('pDetections').textContent = '0';
     document.getElementById('pFps').textContent = '0';
+    // Reset new fields
+    const etaEl  = document.getElementById('pEta');    if (etaEl)  etaEl.textContent  = '—';
+    const drEl   = document.getElementById('pDetRate'); if (drEl)   drEl.textContent   = '0';
+    const skipEl = document.getElementById('pSkipped'); if (skipEl) skipEl.textContent = '0';
+    const metaRow = document.getElementById('procMetaRow');
+    if (metaRow) metaRow.style.display = 'none';
     setProgressBar(0, false);
 
     try {
@@ -412,6 +486,10 @@ async function startProcessing() {
             document.getElementById('stopBtn').style.display = 'inline-flex';
             _seenRunning = false;
             startStatusPolling();
+            startLivePreview();
+            // Show detection badge
+            const badge = document.getElementById('detBadge');
+            if (badge) badge.classList.remove('hidden');
         } else {
             document.getElementById('progressSection').style.display = 'none';
             alert('Error: ' + (data.detail || JSON.stringify(data)));
@@ -422,9 +500,11 @@ async function startProcessing() {
     }
 }
 
+
 async function stopProcessing() {
     await fetch(`${API}/stop`, { method: 'POST' });
     stopStatusPolling();
+    stopLivePreview();
     document.getElementById('processBtn').style.display = 'inline-flex';
     document.getElementById('stopBtn').style.display = 'none';
 }
@@ -445,21 +525,51 @@ async function updateStatus() {
         const res = await fetch(`${API}/status`);
         const d = await res.json();
 
-        const status = d.status || 'idle';
+        const status    = d.status || 'idle';
         const processed = d.processed_frames || 0;
-        const total = d.total_frames || 0;
+        const total     = d.total_frames || 0;
         const detections = d.total_detections || 0;
-        const fps = d.current_fps || 0;
+        const fps       = d.current_fps || 0;
 
-        document.getElementById('pFrames').textContent = processed.toLocaleString();
+        document.getElementById('pFrames').textContent     = processed.toLocaleString();
         document.getElementById('pDetections').textContent = detections.toLocaleString();
-        document.getElementById('pFps').textContent = typeof fps === 'number' ? fps.toFixed(1) : fps;
-        document.getElementById('pStatus').textContent = status.charAt(0).toUpperCase() + status.slice(1);
+        document.getElementById('pFps').textContent        = typeof fps === 'number' ? fps.toFixed(1) : fps;
+        document.getElementById('pStatus').textContent     = status.charAt(0).toUpperCase() + status.slice(1);
+
+        // ETA
+        const etaEl = document.getElementById('pEta');
+        if (etaEl) etaEl.textContent = d.eta_label || (status === 'finished' ? '✓ Done' : '—');
+
+        // Detection rate
+        const drEl = document.getElementById('pDetRate');
+        if (drEl) drEl.textContent = typeof d.detection_rate === 'number' ? d.detection_rate.toFixed(1) : '0';
+
+        // Skipped crops
+        const skipEl = document.getElementById('pSkipped');
+        if (skipEl) skipEl.textContent = (d.skipped_crops || 0).toLocaleString();
+
+        // Video resolution badge (show once we know the resolution)
+        if (d.video_width && d.video_height) {
+            const metaRow = document.getElementById('procMetaRow');
+            const resLabel = document.getElementById('procResLabel');
+            if (metaRow) metaRow.style.display = 'flex';
+            if (resLabel) resLabel.textContent = `${d.video_width} × ${d.video_height}`;
+        }
+
+        // Cache progress for live preview label
+        processor_progress_cache = d;
+
+        // Update detection badge
+        const badge = document.getElementById('detBadge');
+        if (badge && status === 'running') {
+            badge.textContent = detections.toLocaleString();
+            badge.classList.remove('hidden');
+        }
 
         // Sidebar status dot + label
-        const dot = document.getElementById('statusDot');
+        const dot   = document.getElementById('statusDot');
         const label = document.getElementById('statusLabel');
-        dot.className = 'status-dot ' + status;
+        dot.className  = 'status-dot ' + status;
         label.textContent = status.charAt(0).toUpperCase() + status.slice(1);
 
         // Progress bar
@@ -467,31 +577,34 @@ async function updateStatus() {
             const pct = Math.min(100, (processed / total) * 100);
             setProgressBar(pct, false);
         } else if (status === 'running') {
-            // Indeterminate / streaming mode — animate
             setProgressBar(0, true);
         }
 
         // Update header index count
         refreshIndexCount();
 
-        // Track whether we've ever seen 'running'
         if (status === 'running') _seenRunning = true;
 
-        // Only stop polling once processing is actually done
         if (_seenRunning && (status === 'finished' || status === 'idle' || status === 'stopped')) {
             stopStatusPolling();
+            stopLivePreview();
             document.getElementById('processBtn').style.display = 'inline-flex';
             document.getElementById('stopBtn').style.display = 'none';
-            // Show final bar at 100% on finish
-            if (status === 'finished') setProgressBar(100, false);
+            if (status === 'finished') {
+                setProgressBar(100, false);
+                showProcessingToast(detections, d);
+            }
+            setTimeout(() => {
+                const badge = document.getElementById('detBadge');
+                if (badge) badge.classList.add('hidden');
+            }, 5000);
         }
     } catch { /* silent fail */ }
 }
 
 function setProgressBar(pct, indeterminate) {
     const bar = document.getElementById('progressBar');
-    const wrap = bar.parentElement; // .progress-bar-wrap
-    // Find or create the container row (parent of wrap)
+    const wrap = bar.parentElement;
     let row = document.getElementById('progressBarRow');
     if (!row) {
         row = document.createElement('div');
@@ -500,7 +613,6 @@ function setProgressBar(pct, indeterminate) {
         wrap.parentNode.insertBefore(row, wrap);
         row.appendChild(wrap);
     }
-    // Find or create pct label inside the row (not inside wrap)
     let pctLabel = row.querySelector('.progress-pct');
     if (!pctLabel) {
         pctLabel = document.createElement('span');
@@ -516,6 +628,34 @@ function setProgressBar(pct, indeterminate) {
         bar.style.width = pct + '%';
         pctLabel.textContent = pct > 0 ? Math.round(pct) + '%' : '';
     }
+}
+
+// ── Processing complete toast ────────────────────────────────────────────────
+let _toastTimer = null;
+
+function showProcessingToast(detections, statusData) {
+    const toast   = document.getElementById('procToast');
+    const body    = document.getElementById('procToastBody');
+    if (!toast) return;
+
+    const vidW  = statusData.video_width  || 0;
+    const vidH  = statusData.video_height || 0;
+    const skipped = statusData.skipped_crops || 0;
+    const res   = vidW && vidH ? ` · ${vidW}×${vidH}` : '';
+    body.textContent = `${detections.toLocaleString()} detections indexed${res} · ${skipped} crops skipped`;
+
+    toast.classList.remove('hide');
+    toast.style.display = 'flex';
+    if (_toastTimer) clearTimeout(_toastTimer);
+    _toastTimer = setTimeout(dismissToast, 8000);
+}
+
+function dismissToast() {
+    const toast = document.getElementById('procToast');
+    if (!toast) return;
+    toast.classList.add('hide');
+    setTimeout(() => { toast.style.display = 'none'; toast.classList.remove('hide'); }, 350);
+    if (_toastTimer) { clearTimeout(_toastTimer); _toastTimer = null; }
 }
 
 // ── Analytics ───────────────────────────────────────────────────────────────
@@ -700,7 +840,7 @@ async function loadDetections() {
             const timeFmt = formatTime(r.video_time);
             const hasVideo = r.video_src && timeFmt;
             const clickAttr = hasVideo
-                ? `onclick="openVideoModal('${r.video_src.replace(/'/g, "\\'") }', ${r.video_time}, '${(r.label||'').replace(/'/g,"\\'")}')"`
+                ? `onclick="openVideoModal('${r.video_src.replace(/'/g, "\\'")}', ${r.video_time}, '${(r.label||'').replace(/'/g,"\\'")}')"`
                 : '';
             const timeBadge = timeFmt
                 ? `<span class="time-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>${timeFmt}</span>`
@@ -710,6 +850,9 @@ async function loadDetections() {
           <div class="result-img-wrap">
             <img src="${imgSrc}" alt="${r.label}" loading="lazy" onerror="this.style.display='none'"/>
             ${hasVideo ? '<span class="play-overlay"><svg viewBox="0 0 24 24" fill="currentColor" width="28" height="28"><polygon points="5 3 19 12 5 21 5 3"/></svg></span>' : ''}
+            <a class="dl-btn" href="${imgSrc}" download title="Download crop">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            </a>
           </div>
           <div class="result-info">
             <div class="result-label">${r.label || '—'} ${timeBadge}</div>
@@ -723,6 +866,7 @@ async function loadDetections() {
         grid.innerHTML = `<div class="empty-state"><p>Could not load detections. Is the backend running?</p></div>`;
     }
 }
+
 
 async function refreshIndexCount() {
     try {
@@ -833,9 +977,11 @@ async function loadTimeline() {
             dot.style.left = pct + '%';
             dot.style.background = labelColor(d.label);
             dot.title = `${d.label} — ${formatTime(d.video_time)} (conf ${(d.confidence * 100).toFixed(0)}%)`;
+            if (d.crop_path) dot.dataset.crop = cropUrl(d.crop_path);
             dot.onclick = () => openVideoModal(source, d.video_time, d.label);
             tlTrack.appendChild(dot);
         });
+
 
     } catch (err) {
         tlSummary.innerHTML = 'Failed to load timeline.';
@@ -941,22 +1087,29 @@ async function uploadFile(file) {
 
         xhr.onload = () => {
             if (xhr.status === 200) {
-                const data = JSON.parse(xhr.responseText);
                 progLabel.textContent = 'Upload complete! Starting pipeline…';
                 setTimeout(() => {
                     progWrap.classList.add('hidden');
+                    // Reset new stat fields
+                    const etaEl  = document.getElementById('pEta');    if (etaEl)  etaEl.textContent  = '—';
+                    const drEl   = document.getElementById('pDetRate'); if (drEl)   drEl.textContent   = '0';
+                    const skipEl = document.getElementById('pSkipped'); if (skipEl) skipEl.textContent = '0';
+                    const metaRow = document.getElementById('procMetaRow');
+                    if (metaRow) metaRow.style.display = 'none';
                     // Switch to progress view
                     document.getElementById('progressSection').style.display = 'block';
                     document.getElementById('processBtn').style.display = 'none';
                     document.getElementById('stopBtn').style.display = 'inline-flex';
                     _seenRunning = false;
                     startStatusPolling();
+                    startLivePreview();
                 }, 1000);
             } else {
                 alert('Upload failed: ' + xhr.statusText);
                 progWrap.classList.add('hidden');
             }
         };
+
 
         xhr.onerror = () => {
             alert('Network error during upload.');
@@ -1038,6 +1191,9 @@ async function loadPersons() {
                 <img src="${imgSrc}" alt="person" loading="lazy" onerror="this.style.display='none'"/>
                 ${hasVideo ? '<span class="play-overlay"><svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22"><polygon points="5 3 19 12 5 21 5 3"/></svg></span>' : ''}
                 <span class="pgc-count">${g.count} × seen</span>
+                <a class="dl-btn" href="${imgSrc}" download title="Download crop">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                </a>
               </div>
               <div class="pgc-info">
                 <div class="pgc-swatches">${upperSwatch}${lowerSwatch}
@@ -1074,7 +1230,6 @@ async function loadSessions() {
         const rows = sessions.map(s => {
             const started = s.started_at ? new Date(s.started_at).toLocaleString() : '—';
             const finished = s.finished_at ? new Date(s.finished_at).toLocaleString() : '—';
-            // Duration in seconds
             let duration = '—';
             if (s.started_at && s.finished_at) {
                 const secs = Math.round((new Date(s.finished_at) - new Date(s.started_at)) / 1000);
@@ -1093,6 +1248,11 @@ async function loadSessions() {
               <td>${(s.total_detections || 0).toLocaleString()}</td>
               <td>${(s.processed_frames || 0).toLocaleString()}</td>
               <td><span class="session-status ${statusClass}">${s.status || 'unknown'}</span></td>
+              <td>
+                <button class="session-del-btn" onclick="deleteSession(${s.id})" title="Delete session">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                </button>
+              </td>
             </tr>`;
         }).join('');
 
@@ -1102,7 +1262,7 @@ async function loadSessions() {
               <thead>
                 <tr>
                   <th>Source</th><th>Started</th><th>Finished</th>
-                  <th>Duration</th><th>Detections</th><th>Frames</th><th>Status</th>
+                  <th>Duration</th><th>Detections</th><th>Frames</th><th>Status</th><th></th>
                 </tr>
               </thead>
               <tbody>${rows}</tbody>
@@ -1113,3 +1273,324 @@ async function loadSessions() {
         console.error(err);
     }
 }
+
+// ── Session Delete & Clear All ─────────────────────────────────────────────
+async function deleteSession(sessionId) {
+    if (!confirm('Delete this session and all its detections? This cannot be undone.')) return;
+    try {
+        const res = await fetch(`${API}/sessions/${sessionId}`, { method: 'DELETE' });
+        if (res.ok) {
+            loadSessions();
+            refreshIndexCount();
+        } else {
+            const d = await res.json();
+            alert('Error: ' + (d.detail || 'Could not delete session.'));
+        }
+    } catch {
+        alert('Network error. Is the backend running?');
+    }
+}
+
+async function confirmClearAll() {
+    if (!confirm('⚠ This will permanently delete ALL detections, sessions, and the vector index.\n\nAre you absolutely sure?')) return;
+    try {
+        const res = await fetch(`${API}/detections/clear?confirm=true`, { method: 'DELETE' });
+        if (res.ok) {
+            loadSessions();
+            refreshIndexCount();
+            alert('✓ All detections cleared successfully.');
+        } else {
+            const d = await res.json();
+            alert('Error: ' + (d.detail || 'Could not clear detections.'));
+        }
+    } catch {
+        alert('Network error. Is the backend running?');
+    }
+}
+
+// ── Timeline Thumbnail Tooltip ─────────────────────────────────────────────
+(function initTimelineTooltip() {
+    const tooltip = document.getElementById('tlTooltip');
+    const tooltipImg = document.getElementById('tlTooltipImg');
+    const tooltipLabel = document.getElementById('tlTooltipLabel');
+    if (!tooltip) return;
+
+    document.addEventListener('mouseover', e => {
+        const dot = e.target.closest('.tl-dot');
+        if (!dot) { tooltip.style.display = 'none'; return; }
+        const cropSrc = dot.dataset.crop;
+        const label = dot.title || '';
+        if (!cropSrc) { tooltip.style.display = 'none'; return; }
+        tooltipImg.src = cropSrc;
+        tooltipLabel.textContent = label;
+        tooltip.style.display = 'block';
+    });
+
+    document.addEventListener('mousemove', e => {
+        if (!tooltip.style.display || tooltip.style.display === 'none') return;
+        tooltip.style.left = e.clientX + 'px';
+        tooltip.style.top  = e.clientY + 'px';
+    });
+
+    document.addEventListener('mouseout', e => {
+        const dot = e.target.closest('.tl-dot');
+        if (dot) tooltip.style.display = 'none';
+    });
+})();
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  PHASE 5 — Home Dashboard · Image Search · Heatmap · Find Similar
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── Home Dashboard ──────────────────────────────────────────────────────────
+async function loadDashboard() {
+    try {
+        const d = await (await fetch(`${API}/dashboard`)).json();
+
+        // Stat cards
+        const fmt = n => typeof n === 'number' ? n.toLocaleString() : n;
+        document.getElementById('hsTotal').textContent  = fmt(d.total_detections);
+        document.getElementById('hsSources').textContent = fmt(d.unique_sources);
+        document.getElementById('hsAvgConf').textContent = d.avg_confidence_pct + '%';
+        document.getElementById('hsToday').textContent  = fmt(d.today_count);
+
+        // Top classes
+        const topEl = document.getElementById('hsTopClasses');
+        const labels = d.label_counts || {};
+        const entries = Object.entries(labels).sort((a,b)=>b[1]-a[1]).slice(0,8);
+        if (entries.length === 0) {
+            topEl.innerHTML = `<div class="empty-state" style="padding:16px 0"><p>No data yet</p></div>`;
+        } else {
+            const max = entries[0][1] || 1;
+            topEl.innerHTML = entries.map(([lbl, cnt]) => `
+              <div class="top-class-row">
+                <span class="top-class-label">${lbl}</span>
+                <div class="top-class-bar-wrap">
+                  <div class="top-class-bar" style="width:${(cnt/max*100).toFixed(1)}%"></div>
+                </div>
+                <span class="top-class-count">${cnt.toLocaleString()}</span>
+              </div>`).join('');
+        }
+
+        // Recent sessions
+        const sessEl = document.getElementById('hsRecentSessions');
+        const sessions = d.recent_sessions || [];
+        if (sessions.length === 0) {
+            sessEl.innerHTML = `<div class="empty-state" style="padding:16px 0"><p>No sessions yet</p></div>`;
+        } else {
+            sessEl.innerHTML = sessions.map(s => {
+                const src  = s.source ? s.source.split('/').pop().split('\\').pop() : '—';
+                const sc   = s.status === 'finished' ? 'status-finished'
+                           : s.status === 'running'  ? 'status-running'
+                           : 'status-idle';
+                return `<div class="hs-session-row">
+                  <span class="hs-session-src" title="${s.source||''}">${src}</span>
+                  <span class="hs-session-det">${(s.total_detections||0).toLocaleString()} dets</span>
+                  <span class="hs-session-status ${sc}">${s.status||'?'}</span>
+                </div>`;
+            }).join('');
+        }
+    } catch { /* silent if backend not up */ }
+}
+
+// ── Image-based Visual Search ────────────────────────────────────────────────
+(function initImageSearch() {
+    const zone  = document.getElementById('imgSearchZone');
+    const input = document.getElementById('imgSearchInput');
+    if (!zone || !input) return;
+
+    const runImageSearch = async (file) => {
+        if (!file || !file.type.startsWith('image/')) return;
+        const fd = new FormData();
+        fd.append('file', file);
+
+        const status = document.getElementById('searchStatus');
+        if (status) { status.textContent = '🔍 Searching by image…'; status.classList.remove('hidden'); }
+
+        try {
+            const res  = await fetch(`${API}/search/image`, { method: 'POST', body: fd });
+            const data = await res.json();
+            const results = data.results || [];
+            if (status) status.classList.add('hidden');
+            renderSearchResults(results, `Image search — ${results.length} results`);
+        } catch (e) {
+            if (status) { status.textContent = 'Error: ' + e.message; }
+        }
+    };
+
+    input.addEventListener('change', e => e.target.files[0] && runImageSearch(e.target.files[0]));
+
+    zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('dragover'); });
+    zone.addEventListener('dragleave', ()  => zone.classList.remove('dragover'));
+    zone.addEventListener('drop',      e => {
+        e.preventDefault();
+        zone.classList.remove('dragover');
+        const file = e.dataTransfer.files[0];
+        if (file) runImageSearch(file);
+    });
+})();
+
+// Helper: render any array of results into #resultsGrid (shared with text search)
+function renderSearchResults(results, statusMsg) {
+    const grid = document.getElementById('resultsGrid');
+    const exportBar = document.getElementById('searchExportBar');
+    if (!results || results.length === 0) {
+        grid.innerHTML = `<div class="empty-state"><p>No similar detections found.</p></div>`;
+        if (exportBar) exportBar.classList.add('hidden');
+        return;
+    }
+    if (exportBar) exportBar.classList.remove('hidden');
+    grid.innerHTML = results.map(r => {
+        const score   = r.score != null ? Math.round(r.score * 100) : '—';
+        const imgSrc  = cropUrl(r.crop_path || '');
+        const ts      = r.timestamp ? new Date(r.timestamp).toLocaleString() : '—';
+        const timeFmt = formatTime(r.video_time);
+        const hasVideo = r.video_src && timeFmt;
+        const clickAttr = hasVideo
+            ? `onclick="openVideoModal('${r.video_src.replace(/'/g,"\\'")}',${r.video_time},'${(r.label||'').replace(/'/g,"\\'")}')"`
+            : '';
+        const timeBadge = timeFmt
+            ? `<span class="time-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>${timeFmt}</span>`
+            : '';
+        return `
+          <div class="result-card${hasVideo?' clickable':''}" ${clickAttr}>
+            <div class="result-img-wrap">
+              <img src="${imgSrc}" alt="${r.label}" loading="lazy" onerror="this.style.display='none'"/>
+              ${typeof score === 'number' ? `<span class="result-score-badge">${score}%</span>` : ''}
+              ${hasVideo ? '<span class="play-overlay"><svg viewBox="0 0 24 24" fill="currentColor" width="28" height="28"><polygon points="5 3 19 12 5 21 5 3"/></svg></span>' : ''}
+              <a class="dl-btn" href="${imgSrc}" download title="Download crop">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              </a>
+              ${r.id ? `<button class="sim-btn" onclick="event.stopPropagation();openSimilarModal(${r.id},'${(r.label||'detection').replace(/'/g,"\\'")}')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="10" height="10"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>Similar
+              </button>` : ''}
+            </div>
+            <div class="result-info">
+              <div class="result-label">${r.label||'—'} ${timeBadge}</div>
+              ${shirtBadgeHtml(r)}
+              <div class="result-meta">${ts}</div>
+              ${r.confidence ? `<div class="result-meta">conf ${(r.confidence*100).toFixed(1)}%</div>` : ''}
+            </div>
+          </div>`;
+    }).join('');
+}
+
+// ── Spatial Heatmap ──────────────────────────────────────────────────────────
+async function loadHeatmap() {
+    const canvas = document.getElementById('heatmapCanvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const label = document.getElementById('hmapLabel')?.value || '';
+    const W = canvas.width, H = canvas.height;
+
+    ctx.fillStyle = '#07091a';
+    ctx.fillRect(0, 0, W, H);
+
+    try {
+        let url = `${API}/heatmap?grid=24`;
+        if (label) url += `&label=${encodeURIComponent(label)}`;
+        const data = await (await fetch(url)).json();
+        const cells = data.cells || [];
+        const grid  = data.grid || 24;
+        if (!cells.length) { ctx.fillStyle='rgba(255,255,255,0.1)'; ctx.font='14px sans-serif'; ctx.fillText('No data — process a video first', 40, H/2); return; }
+
+        const maxCount = Math.max(...cells.map(c => c.count), 1);
+        const cellW = W / grid, cellH = H / grid;
+
+        cells.forEach(({col, row, count}) => {
+            const t = count / maxCount;
+            // Heat color: blue → cyan → green → yellow → red
+            let r, g, b;
+            if (t < 0.25)      { const p=t/0.25;        r=Math.round(59*p);    g=Math.round(130*p);   b=Math.round(246-246*p); }
+            else if (t < 0.5)  { const p=(t-0.25)/0.25; r=Math.round(59+3*p);  g=Math.round(130+55*p);b=Math.round(6); }
+            else if (t < 0.75) { const p=(t-0.5)/0.25;  r=Math.round(62+188*p);g=Math.round(185-92*p);b=Math.round(6-6*p); }
+            else               { const p=(t-0.75)/0.25;  r=Math.round(250+4*p); g=Math.round(93-93*p); b=0; }
+
+            const alpha = 0.3 + t * 0.7;
+            ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
+            const pad = 1;
+            ctx.fillRect(col*cellW+pad, row*cellH+pad, cellW-pad*2, cellH-pad*2);
+        });
+
+        // Grid overlay
+        ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+        ctx.lineWidth = 0.5;
+        for(let c=0;c<=grid;c++){ctx.beginPath();ctx.moveTo(c*cellW,0);ctx.lineTo(c*cellW,H);ctx.stroke();}
+        for(let r=0;r<=grid;r++){ctx.beginPath();ctx.moveTo(0,r*cellH);ctx.lineTo(W,r*cellH);ctx.stroke();}
+    } catch(e) { console.error(e); }
+}
+
+// ── Find Similar Modal ───────────────────────────────────────────────────────
+document.getElementById('similarClose')?.addEventListener('click', () => {
+    document.getElementById('similarModal').classList.remove('open');
+});
+document.getElementById('similarModal')?.addEventListener('click', e => {
+    if (e.target === e.currentTarget) document.getElementById('similarModal').classList.remove('open');
+});
+
+async function openSimilarModal(detectionId, label) {
+    const modal = document.getElementById('similarModal');
+    const grid  = document.getElementById('similarResults');
+    const src   = document.getElementById('similarSourceWrap');
+    if (!modal) return;
+
+    modal.classList.add('open');
+    grid.innerHTML = `<div class="empty-state"><div class="spinner"></div> Searching for similar ${label}s…</div>`;
+    if (src) src.innerHTML = `<span style="font-size:11px;color:var(--text-muted)">Source detection ID #${detectionId}</span>`;
+
+    try {
+        const res  = await fetch(`${API}/search/similar/${detectionId}?top_k=16`);
+        if (!res.ok) { grid.innerHTML = `<div class="empty-state"><p>Not in vector index. Re-process video to rebuild index.</p></div>`; return; }
+        const data = await res.json();
+        const results = data.results || [];
+        if (!results.length) { grid.innerHTML = `<div class="empty-state"><p>No similar detections found.</p></div>`; return; }
+
+        grid.innerHTML = results.map(r => {
+            const score   = r.score != null ? Math.round(r.score * 100) : '—';
+            const imgSrc  = cropUrl(r.crop_path || '');
+            const ts      = r.timestamp ? new Date(r.timestamp).toLocaleString() : '—';
+            const timeFmt = formatTime(r.video_time);
+            const hasVideo = r.video_src && timeFmt;
+            const clickAttr = hasVideo
+                ? `onclick="openVideoModal('${r.video_src.replace(/'/g,"\\'")}',${r.video_time},'${(r.label||'').replace(/'/g,"\\'")}')"`
+                : '';
+            const timeBadge = timeFmt
+                ? `<span class="time-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>${timeFmt}</span>`
+                : '';
+            return `
+              <div class="result-card${hasVideo?' clickable':''}" ${clickAttr}>
+                <div class="result-img-wrap">
+                  <img src="${imgSrc}" alt="${r.label}" loading="lazy" onerror="this.style.display='none'"/>
+                  <span class="result-score-badge">${score}%</span>
+                  ${hasVideo ? '<span class="play-overlay"><svg viewBox="0 0 24 24" fill="currentColor" width="28" height="28"><polygon points="5 3 19 12 5 21 5 3"/></svg></span>' : ''}
+                  <a class="dl-btn" href="${imgSrc}" download>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  </a>
+                </div>
+                <div class="result-info">
+                  <div class="result-label">${r.label||'—'} ${timeBadge}</div>
+                  ${shirtBadgeHtml(r)}
+                  <div class="result-meta">${ts}</div>
+                  ${r.confidence ? `<div class="result-meta">conf ${(r.confidence*100).toFixed(1)}%</div>` : ''}
+                </div>
+              </div>`;
+        }).join('');
+    } catch(e) {
+        grid.innerHTML = `<div class="empty-state"><p>Error: ${e.message}</p></div>`;
+    }
+}
+
+// ── Wire Home tab load ───────────────────────────────────────────────────────
+document.querySelector('[data-tab="home"]')?.addEventListener('click', loadDashboard);
+
+// ── Wire Analytics tab load heatmap ─────────────────────────────────────────
+document.querySelector('[data-tab="analytics"]')?.addEventListener('click', () => {
+    setTimeout(loadHeatmap, 200); // after tab transition
+});
+
+// ── Update keyboard shortcuts map for Home tab (0 = home, 1 = search, …) ─────
+// Override the existing TAB_KEYS to include Home
+if (typeof TAB_KEYS !== 'undefined') {
+    TAB_KEYS['0'] = 'home';
+}
+

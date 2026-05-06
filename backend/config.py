@@ -34,9 +34,13 @@ CLIP_PRETRAINED = os.getenv("CLIP_PRETRAINED", "openai")
 
 # Processing
 VIDEO_SOURCE         = os.getenv("VIDEO_SOURCE", str(DEMO_DIR / "sample.mp4"))
-CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.4"))
-FRAME_SKIP           = int(os.getenv("FRAME_SKIP", "5"))
+CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.25"))  # lowered for unseen videos
+FRAME_SKIP           = int(os.getenv("FRAME_SKIP", "3"))  # adaptive: process more frames for short/low-FPS videos
 EMBEDDING_DIM        = 512
+
+# Preprocessing
+MIN_CROP_SIZE  = int(os.getenv("MIN_CROP_SIZE", "30"))    # skip crops smaller than N×N px
+APPLY_CLAHE    = os.getenv("APPLY_CLAHE", "true").lower() != "false"  # contrast normalisation
 
 # YOLO — None means detect all classes
 YOLO_CLASSES_OF_INTEREST = None
