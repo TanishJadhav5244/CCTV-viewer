@@ -1581,7 +1581,11 @@ async function openSimilarModal(detectionId, label) {
 }
 
 // ── Wire Home tab load ───────────────────────────────────────────────────────
-document.querySelector('[data-tab="home"]')?.addEventListener('click', loadDashboard);
+document.querySelector('[data-tab="home"]')?.addEventListener('click', () => {
+    loadDashboard();
+    loadHomeDetections();
+    loadHomeActivityFeed();
+});
 
 // ── Wire Analytics tab load heatmap ─────────────────────────────────────────
 document.querySelector('[data-tab="analytics"]')?.addEventListener('click', () => {
@@ -1589,8 +1593,227 @@ document.querySelector('[data-tab="analytics"]')?.addEventListener('click', () =
 });
 
 // ── Update keyboard shortcuts map for Home tab (0 = home, 1 = search, …) ─────
-// Override the existing TAB_KEYS to include Home
 if (typeof TAB_KEYS !== 'undefined') {
     TAB_KEYS['0'] = 'home';
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  HOME DASHBOARD — Enhanced Features
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── Quick Search from Home ───────────────────────────────────────────────────
+function homeQuickSearch(query) {
+    // Navigate to search tab and fire the query
+    document.querySelector('[data-tab="search"]')?.click();
+    const inp = document.getElementById('searchInput');
+    if (inp) {
+        inp.value = query;
+        inp.dispatchEvent(new Event('input'));
+    }
+    setTimeout(() => {
+        const btn = document.getElementById('searchBtn');
+        if (btn) btn.click();
+    }, 100);
+}
+
+document.getElementById('homeSearchBtn')?.addEventListener('click', () => {
+    const q = document.getElementById('homeSearchInput')?.value?.trim();
+    if (q) homeQuickSearch(q);
+});
+document.getElementById('homeSearchInput')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+        const q = e.target.value.trim();
+        if (q) homeQuickSearch(q);
+    }
+});
+
+// ── Thumbnail Strip ──────────────────────────────────────────────────────────
+let _homeDonutChart = null;
+
+async function loadHomeDetections() {
+    const strip  = document.getElementById('homeThumbStrip');
+    const countEl = document.getElementById('homeDetCount');
+    if (!strip) return;
+
+    try {
+        const data = await (await fetch(`${API}/detections?limit=30`)).json();
+        const dets = data.detections || data || [];
+
+        if (!dets.length) {
+            strip.innerHTML = `<div class="empty-state" style="padding:20px 0"><p>No detections yet. Process a video to begin.</p></div>`;
+            if (countEl) countEl.textContent = '';
+            return;
+        }
+
+        if (countEl) countEl.textContent = `${dets.length} shown`;
+
+        strip.innerHTML = dets.map(d => {
+            const imgSrc  = cropUrl(d.crop_path || '');
+            const timeFmt = formatTime(d.video_time);
+            const hasVideo = d.video_src && timeFmt;
+            const clickAttr = hasVideo
+                ? `onclick="openVideoModal('${d.video_src.replace(/'/g,"\\'")}',${d.video_time},'${(d.label||'').replace(/'/g,"\\'")}')"`
+                : '';
+            return `
+              <div class="home-thumb" ${clickAttr}>
+                <img src="${imgSrc}" alt="${d.label}" loading="lazy" onerror="this.style.display='none'"/>
+                <div class="home-thumb-label">${d.label || '—'}</div>
+              </div>`;
+        }).join('');
+
+        // Build mini donut chart from label counts
+        const labelCounts = {};
+        dets.forEach(d => { labelCounts[d.label] = (labelCounts[d.label] || 0) + 1; });
+        renderHomeDonut(labelCounts);
+
+    } catch { /* silent */ }
+}
+
+// Mini donut chart in top-classes card header
+const DONUT_COLORS = ['#06b6d4','#8b5cf6','#10b981','#f97316','#ec4899','#3b82f6','#f59e0b','#ef4444'];
+
+function renderHomeDonut(labelCounts) {
+    const canvas = document.getElementById('homeDonutChart');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const entries = Object.entries(labelCounts).sort((a,b) => b[1]-a[1]).slice(0, 8);
+    const total   = entries.reduce((s,[,v]) => s + v, 0) || 1;
+
+    // Simple canvas donut
+    const cx = 28, cy = 28, R = 24, r = 14;
+    ctx.clearRect(0, 0, 56, 56);
+    let angle = -Math.PI / 2;
+    entries.forEach(([, cnt], i) => {
+        const sweep = (cnt / total) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, R, angle, angle + sweep);
+        ctx.closePath();
+        ctx.fillStyle = DONUT_COLORS[i % DONUT_COLORS.length];
+        ctx.fill();
+        angle += sweep;
+    });
+    // Punch out center
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = '#0d1128';
+    ctx.fill();
+}
+
+// ── Live Activity Feed ───────────────────────────────────────────────────────
+let _prevActivityStatus = null;
+let _activityPoller = null;
+
+async function loadHomeActivityFeed() {
+    const feed    = document.getElementById('homeActivityFeed');
+    const timeEl  = document.getElementById('homeActivityTime');
+    if (!feed) return;
+
+    // Update clock
+    if (timeEl) timeEl.textContent = new Date().toLocaleTimeString();
+
+    try {
+        const p = await (await fetch(`${API}/status`)).json();
+        const status = p.status || 'idle';
+
+        // Only push a new entry when status changes
+        if (status !== _prevActivityStatus) {
+            _prevActivityStatus = status;
+            let icon = '💤', cls = 'activity-idle', msg = 'System idle';
+
+            if (status === 'running') {
+                icon = '⚙️'; cls = 'activity-running';
+                const src = (p.source || '').split('/').pop().split('\\').pop() || 'video';
+                msg = `Processing <strong>${src}</strong> — ${(p.total_detections||0)} detections`;
+            } else if (status === 'finished') {
+                icon = '✅'; cls = 'activity-done';
+                const dets = p.total_detections || 0;
+                msg = `Completed — <strong>${dets.toLocaleString()} detections</strong> indexed`;
+            } else if (status.startsWith('error')) {
+                icon = '❌'; cls = 'activity-error';
+                msg = `Error: ${status.replace('error: ', '')}`;
+            }
+
+            const row = document.createElement('div');
+            row.className = `activity-row ${cls}`;
+            row.innerHTML = `<span class="activity-icon">${icon}</span><span>${msg}</span>
+              <span style="margin-left:auto;font-size:10px;color:var(--text-muted);white-space:nowrap">${new Date().toLocaleTimeString()}</span>`;
+
+            // Prepend (newest on top) and limit to 8 entries
+            feed.insertBefore(row, feed.firstChild);
+            while (feed.children.length > 8) feed.removeChild(feed.lastChild);
+        }
+
+        // Also update FAISS badge
+        const faissBadge = document.getElementById('sysFaissBadge');
+        if (faissBadge) {
+            const idx = await (await fetch(`${API}/stats`)).json();
+            const n = idx.index_size || 0;
+            faissBadge.textContent = `${n.toLocaleString()} vectors`;
+            faissBadge.className = n > 0 ? 'sys-badge sys-badge-ok' : 'sys-badge';
+        }
+
+        // Persons count
+        const personsEl = document.getElementById('hsPersons');
+        if (personsEl) {
+            try {
+                const pg = await (await fetch(`${API}/persons`)).json();
+                personsEl.textContent = (pg || []).length.toLocaleString();
+            } catch { personsEl.textContent = '—'; }
+        }
+
+    } catch { /* silent */ }
+}
+
+// ── Home Dashboard enhanced loadDashboard ───────────────────────────────────
+// Override the existing loadDashboard to also fill hsPersons and FAISS badge
+const _origLoadDashboard = typeof loadDashboard === 'function' ? loadDashboard : null;
+async function loadDashboard() {
+    if (_origLoadDashboard) await _origLoadDashboard();
+    loadHomeActivityFeed();
+
+    // Also refresh FAISS badge if not already done
+    try {
+        const idx = await (await fetch(`${API}/stats`)).json();
+        const n = idx.index_size || 0;
+        const faissBadge = document.getElementById('sysFaissBadge');
+        if (faissBadge) {
+            faissBadge.textContent = `${n.toLocaleString()} vectors`;
+            faissBadge.className = n > 0 ? 'sys-badge sys-badge-ok' : 'sys-badge';
+        }
+        // Update FAISS dot colour
+        const faissDot = document.getElementById('sysFaissDot');
+        if (faissDot) faissDot.style.background = n > 0 ? 'var(--green)' : 'var(--amber)';
+    } catch { /* silent */ }
+}
+
+// ── Home Drop Zone ───────────────────────────────────────────────────────────
+(function initHomeDropZone() {
+    const zone    = document.getElementById('homeDropZone');
+    const input   = document.getElementById('homeFileInput');
+    const statusEl = document.getElementById('homeUploadStatus');
+    if (!zone || !input) return;
+
+    const handleFile = (file) => {
+        if (!file) return;
+        if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = `Selected: ${file.name} — switching to Process tab…`; }
+        // Switch to process tab and trigger the upload there
+        document.querySelector('[data-tab="process"]')?.click();
+        setTimeout(() => {
+            // Trigger the existing uploadFile function
+            if (typeof uploadFile === 'function') uploadFile(file);
+        }, 400);
+    };
+
+    input.addEventListener('change', e => { if (e.target.files[0]) handleFile(e.target.files[0]); });
+
+    zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('dragover'); });
+    zone.addEventListener('dragleave', ()  => zone.classList.remove('dragover'));
+    zone.addEventListener('drop', e => {
+        e.preventDefault();
+        zone.classList.remove('dragover');
+        const file = e.dataTransfer.files[0];
+        if (file) handleFile(file);
+    });
+})();
 
