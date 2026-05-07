@@ -5,9 +5,9 @@ description = "CCTV Deep Learning Analytics — YOLOv8 + CLIP + FastAPI"
 requires-python = ">=3.9"
 
 [project.scripts]
-app = "main:app"
+app = "app:app"
 
 [tool.uvicorn]
-app = "main:app"
+app = "app:app"
 host = "0.0.0.0"
 port = 8000
