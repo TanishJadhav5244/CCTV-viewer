@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+numpy
+faiss-cpu
+python-multipart
+Pillow
+aiofiles
