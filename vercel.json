@@ -20,15 +20,15 @@
       "dest": "/frontend/app.js"
     },
     {
-      "src": "/crops/(.*)",
+      "src": "/crops/(.+)",
       "dest": "/frontend/crops/$1"
     },
     {
-      "src": "/(.*\\.(?:js|css|html|ico|png|svg|jpg|jpeg|woff2?))",
+      "src": "/(.+\\.(?:js|css|html|ico|png|svg|jpg|jpeg|gif|woff2?))",
       "dest": "/frontend/$1"
     },
     {
-      "src": "/(stats|sources|sessions|persons|detections|timeline|dashboard|heatmap|health|status|search|upload|process|stop|frame|api)(.*)",
+      "src": "/(stats|sources|sessions|persons|detections|timeline|dashboard|heatmap|health|status|search|upload|process|stop|frame)(/.*)?$",
       "dest": "/api/index.py"
     },
     {
