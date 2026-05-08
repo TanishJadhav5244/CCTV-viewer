@@ -25,6 +25,11 @@ data/db/*.json
 data/videos/
 demo/*.mp4
 
+# Seed DB and crops for Vercel deployment (DO commit these)
+!api/seed.db
+!frontend/crops/
+!frontend/crops/*
+
 # YOLOv8 model weights (download on demand)
 *.pt
 *.onnx

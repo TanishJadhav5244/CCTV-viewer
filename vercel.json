@@ -20,7 +20,11 @@
       "dest": "/frontend/app.js"
     },
     {
-      "src": "/(.*\\.(?:js|css|html|ico|png|svg|woff2?))",
+      "src": "/crops/(.*)",
+      "dest": "/frontend/crops/$1"
+    },
+    {
+      "src": "/(.*\\.(?:js|css|html|ico|png|svg|jpg|jpeg|woff2?))",
       "dest": "/frontend/$1"
     },
     {

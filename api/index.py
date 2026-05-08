@@ -50,10 +50,16 @@ app.add_middleware(
 _TMP_DIR = Path("/tmp/cctv_data")
 
 def _sqlite_path() -> Optional[Path]:
-    """Return path to SQLite DB, checking /tmp (Vercel) and local data/ dir."""
+    """Return path to SQLite DB.
+    Priority:
+      1. api/seed.db  — pre-seeded DB committed to the repo (Vercel)
+      2. /tmp/cctv_data/db/detections.db — runtime-written (if ever)
+      3. data/db/detections.db — local dev
+    """
     candidates = [
-        _TMP_DIR / "db" / "detections.db",
-        ROOT / "data" / "db" / "detections.db",
+        ROOT / "api" / "seed.db",           # committed seed DB (Vercel)
+        _TMP_DIR / "db" / "detections.db",  # runtime /tmp
+        ROOT / "data" / "db" / "detections.db",  # local dev
     ]
     for p in candidates:
         if p.exists():
