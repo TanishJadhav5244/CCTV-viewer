@@ -1,15 +1,17 @@
 """
-Vercel / deployment entrypoint.
-Vercel looks for a FastAPI 'app' object in app.py (or main.py) at the project root.
-The real app lives in backend/main.py — we just re-export it from here.
+app.py — Root-level alias for deployment platforms that look for app.py.
+
+This re-exports the same FastAPI app as api/index.py so that
+platforms like Railway / Render also find an entrypoint.
+
+Vercel uses api/index.py directly (configured in vercel.json).
 """
 import sys
 from pathlib import Path
 
-# Ensure backend/ is importable before anything else
-BACKEND_DIR = Path(__file__).parent / "backend"
-sys.path.insert(0, str(BACKEND_DIR))
+# Ensure api/ is importable
+sys.path.insert(0, str(Path(__file__).parent / "api"))
 
-from backend.main import app  # noqa: F401  (backend/main.py → FastAPI instance)
+from index import app  # noqa: F401
 
 __all__ = ["app"]

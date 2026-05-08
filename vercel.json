@@ -4,12 +4,32 @@
     {
       "src": "api/index.py",
       "use": "@vercel/python"
+    },
+    {
+      "src": "frontend/**",
+      "use": "@vercel/static"
     }
   ],
   "routes": [
     {
+      "src": "/style\\.css",
+      "dest": "/frontend/style.css"
+    },
+    {
+      "src": "/app\\.js",
+      "dest": "/frontend/app.js"
+    },
+    {
+      "src": "/(.*\\.(?:js|css|html|ico|png|svg|woff2?))",
+      "dest": "/frontend/$1"
+    },
+    {
+      "src": "/(stats|sources|sessions|persons|detections|timeline|dashboard|heatmap|health|status|search|upload|process|stop|frame|api)(.*)",
+      "dest": "/api/index.py"
+    },
+    {
       "src": "/(.*)",
-      "dest": "api/index.py"
+      "dest": "/frontend/index.html"
     }
   ]
 }

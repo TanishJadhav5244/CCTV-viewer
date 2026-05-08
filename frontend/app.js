@@ -1,4 +1,7 @@
-const API = 'http://localhost:8000';
+// Auto-detect API base: on Vercel/production use same origin; locally use port 8000
+const API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+    ? 'http://localhost:8000'
+    : '';
 let analyticsChart = null;
 let statusPoller = null;
 let _seenRunning = false; // guard: don't stop poller before 'running' is ever seen
